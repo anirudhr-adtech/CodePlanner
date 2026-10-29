@@ -1,0 +1,8 @@
+{
+  "id": "17_apb_timer_watchdog",
+  "title": "APB3 Dual Timer and Watchdog",
+  "category": "peripheral",
+  "difficulty": "medium",
+  "split": "val",
+  "tags": ["apb", "timer", "watchdog", "interrupt", "register-map", "prescaler"]
+}

@@ -1,0 +1,8 @@
+{
+  "id": "19_dma_controller",
+  "title": "4-Channel AXI4 DMA Controller",
+  "category": "memory-system",
+  "difficulty": "hard",
+  "split": "train",
+  "tags": ["dma", "axi4", "axi4-lite", "burst", "4kb-boundary", "round-robin", "interrupt"]
+}

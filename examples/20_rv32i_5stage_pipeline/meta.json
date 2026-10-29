@@ -1,0 +1,8 @@
+{
+  "id": "20_rv32i_5stage_pipeline",
+  "title": "RV32I 5-Stage Pipelined Core",
+  "category": "processor",
+  "difficulty": "hard",
+  "split": "train",
+  "tags": ["risc-v", "rv32i", "pipeline", "forwarding", "hazard", "branch", "cpu"]
+}

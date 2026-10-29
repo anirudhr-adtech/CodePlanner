@@ -1,0 +1,8 @@
+{
+  "id": "18_direct_mapped_cache",
+  "title": "Direct-Mapped Write-Back Data Cache",
+  "category": "memory-system",
+  "difficulty": "hard",
+  "split": "train",
+  "tags": ["cache", "write-back", "write-allocate", "sram", "burst", "fsm", "valid-ready"]
+}
