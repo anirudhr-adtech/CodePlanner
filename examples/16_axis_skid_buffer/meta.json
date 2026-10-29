@@ -1,0 +1,8 @@
+{
+  "id": "16_axis_skid_buffer",
+  "title": "AXI-Stream Skid Buffer / Register Slice",
+  "category": "bus",
+  "difficulty": "easy",
+  "split": "train",
+  "tags": ["axi-stream", "skid-buffer", "register-slice", "timing-closure", "valid-ready"]
+}

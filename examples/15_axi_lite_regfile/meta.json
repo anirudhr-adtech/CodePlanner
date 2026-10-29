@@ -1,0 +1,8 @@
+{
+  "id": "15_axi_lite_regfile",
+  "title": "AXI4-Lite Control/Status Register File",
+  "category": "bus",
+  "difficulty": "medium",
+  "split": "train",
+  "tags": ["axi4-lite", "register-map", "w1c", "self-clearing", "wstrb", "slverr"]
+}

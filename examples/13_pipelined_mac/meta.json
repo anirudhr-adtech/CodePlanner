@@ -1,0 +1,8 @@
+{
+  "id": "13_pipelined_mac",
+  "title": "Pipelined Signed Fixed-Point MAC",
+  "category": "arithmetic",
+  "difficulty": "medium",
+  "split": "train",
+  "tags": ["mac", "fixed-point", "saturation", "rounding", "pipeline", "dsp48"]
+}

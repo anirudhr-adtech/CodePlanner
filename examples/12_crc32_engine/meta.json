@@ -1,0 +1,8 @@
+{
+  "id": "12_crc32_engine",
+  "title": "Streaming CRC-32 Engine (IEEE 802.3)",
+  "category": "arithmetic",
+  "difficulty": "medium",
+  "split": "train",
+  "tags": ["crc", "ethernet", "lfsr", "parallel-crc", "valid-ready", "byte-enable"]
+}

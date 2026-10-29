@@ -1,0 +1,8 @@
+{
+  "id": "14_fir_filter",
+  "title": "Symmetric Systolic FIR Filter",
+  "category": "dsp",
+  "difficulty": "hard",
+  "split": "train",
+  "tags": ["fir", "systolic", "pre-adder", "coefficient-reload", "bit-growth", "dsp48"]
+}
