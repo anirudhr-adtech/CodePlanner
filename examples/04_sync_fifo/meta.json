@@ -1,0 +1,8 @@
+{
+  "id": "04_sync_fifo",
+  "title": "Synchronous FIFO",
+  "category": "storage",
+  "difficulty": "easy",
+  "split": "train",
+  "tags": ["fifo", "memory", "flow-control", "valid-ready"]
+}
