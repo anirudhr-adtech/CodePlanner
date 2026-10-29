@@ -1,0 +1,8 @@
+{
+  "id": "10_async_fifo",
+  "title": "Asynchronous Dual-Clock FIFO",
+  "category": "storage",
+  "difficulty": "medium",
+  "split": "train",
+  "tags": ["fifo", "cdc", "gray-code", "synchronizer", "dual-clock"]
+}

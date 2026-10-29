@@ -1,0 +1,8 @@
+{
+  "id": "11_interrupt_controller",
+  "title": "32-Source Priority Interrupt Controller",
+  "category": "peripheral",
+  "difficulty": "medium",
+  "split": "val",
+  "tags": ["interrupt", "priority-encoder", "nesting", "registers", "edge-detect"]
+}

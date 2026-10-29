@@ -1,0 +1,8 @@
+{
+  "id": "08_spi_master",
+  "title": "SPI Master Controller",
+  "category": "interface",
+  "difficulty": "medium",
+  "split": "train",
+  "tags": ["spi", "serial", "cpol", "cpha", "clock-divider", "registers"]
+}

@@ -1,0 +1,8 @@
+{
+  "id": "07_uart_transceiver",
+  "title": "UART Transceiver with FIFOs",
+  "category": "interface",
+  "difficulty": "medium",
+  "split": "train",
+  "tags": ["uart", "serial", "oversampling", "fifo", "parity"]
+}

@@ -1,0 +1,8 @@
+{
+  "id": "09_i2c_master",
+  "title": "I2C Master Controller",
+  "category": "interface",
+  "difficulty": "hard",
+  "split": "train",
+  "tags": ["i2c", "open-drain", "clock-stretching", "arbitration", "serial"]
+}
