@@ -1,0 +1,8 @@
+{
+  "id": "06_round_robin_arbiter",
+  "title": "Round-Robin Arbiter with Lock",
+  "category": "arbitration",
+  "difficulty": "medium",
+  "split": "train",
+  "tags": ["arbiter", "round-robin", "fairness", "one-hot", "lock"]
+}

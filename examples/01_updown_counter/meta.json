@@ -1,0 +1,8 @@
+{
+  "id": "01_updown_counter",
+  "title": "Up/Down Counter with Load",
+  "category": "counter",
+  "difficulty": "easy",
+  "split": "train",
+  "tags": ["counter", "load", "saturate", "terminal-count"]
+}

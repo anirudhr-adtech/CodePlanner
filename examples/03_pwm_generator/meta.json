@@ -1,0 +1,8 @@
+{
+  "id": "03_pwm_generator",
+  "title": "Multi-Channel PWM Generator",
+  "category": "peripheral",
+  "difficulty": "easy",
+  "split": "val",
+  "tags": ["pwm", "shadow-registers", "center-aligned", "timer"]
+}

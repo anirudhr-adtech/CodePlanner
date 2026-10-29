@@ -1,0 +1,8 @@
+{
+  "id": "05_traffic_light_fsm",
+  "title": "Traffic Light Controller",
+  "category": "fsm",
+  "difficulty": "easy",
+  "split": "train",
+  "tags": ["fsm", "timer", "pedestrian", "sensor"]
+}
