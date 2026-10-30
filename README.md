@@ -49,3 +49,40 @@ your trainer rejects extra keys.
 1. Create `examples/NN_name/` with `meta.json`, `spec.md` and `microarch.md`.
 2. Run `python3 scripts/build_dataset.py --check`.
 3. Rebuild the JSONL files.
+
+## MA planner agent (v0)
+
+The planner does not write the MA doc. It turns a spec into a spec-specific **step plan**
+for writing one, plus the questions that would change the architecture. The agent runs
+the loop around the planner model:
+
+```
+spec -> planner LLM (one turn, JSON) -> code checks --fail--> retry with feedback
+                                          |pass
+                          blocking questions? --yes--> ask user -> next turn
+                                          |no
+                                        READY -> plan.json / plan.md
+```
+
+| File | Role |
+|------|------|
+| `agent/planner_llm.py` | The only planning model call. Swap `ClaudePlanner` for the trained model later. |
+| `agent/schema.py` | The plan JSON contract (steps, decisions, questions, assumptions). |
+| `prompts/planner_system.md` | Planner instructions. |
+| `agent/checker.py` | Code checks: verbatim quotes, done-criteria, dependencies, generic titles, open decisions. |
+| `agent/loop.py` | Draft, check, retry, question gate, stop rule (ready or 5 rounds). |
+| `agent/user.py` | Interactive user, or a simulated user that answers from the example's MA doc. |
+| `agent/judge.py` | Evaluation only: compares the plan's decisions with the MA doc (answer key). |
+
+```bash
+pip install -r requirements.txt
+export ANTHROPIC_API_KEY=...
+python3 -m agent --example 04_sync_fifo                 # simulated user + judge
+python3 -m agent --example 04_sync_fifo --interactive   # you answer the questions
+python3 -m agent --all --jobs 5                         # every example
+```
+
+Each run writes `runs/<timestamp>/<example>/`: `log.jsonl` (every prompt, raw output,
+check result, question and answer), `plan.json`, `plan.md`, `qa.json`, `summary.json`
+and `judge.json`. These logs are what we study to decide the LLM/agent boundary, and
+later become training data.
