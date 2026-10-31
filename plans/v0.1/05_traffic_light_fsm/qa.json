@@ -1,0 +1,16 @@
+[
+  {
+    "id": "Q1",
+    "decision_id": "D3",
+    "question": "How many pedestrian buttons and WALK/DON'T WALK signal heads are there (one per crosswalk = 4, or one per road = 2)? Is there one car sensor per road or one per approach (4)?",
+    "in_doc": true,
+    "answer": "One per road for all of them. There are 2 pedestrian button inputs: ped_btn_ns_raw for walking parallel to NS, and ped_btn_ew_raw for walking parallel to EW. There are 2 WALK/DON'T WALK output pairs (ns_walk/ns_dont_walk and ew_walk/ew_dont_walk). There are 2 car sensor inputs (car_ns_raw and car_ew_raw), each meaning a vehicle is present on any approach of that road."
+  },
+  {
+    "id": "Q2",
+    "decision_id": "D4",
+    "question": "Should pedestrians cross concurrently with the parallel vehicle green (WALK, then flashing DON'T WALK ending before yellow), or get an exclusive all-red pedestrian phase?",
+    "in_doc": true,
+    "answer": "Concurrent. The WALK runs alongside the parallel vehicle green; there is no exclusive pedestrian phase. A latched request is served with WALK, then flashing DON'T WALK. The green is held until clearance completes (even past GREEN_MAX), and only then does yellow begin. A walk can also start mid-green while resting with no cross demand. A press during clearance is latched for the next green of that road."
+  }
+]

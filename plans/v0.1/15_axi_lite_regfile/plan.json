@@ -1,0 +1,590 @@
+{
+  "steps": [
+    {
+      "id": "S1",
+      "title": "Scope ctrl_regs: register map summary, core-side signal set, VERSION parameter and single-clock (no-CDC) assumption",
+      "goal": "Write the Overview. Describe ctrl_regs as a 7-register AXI4-Lite slave that drives CTRL fields and CMD pulses to the core, samples live STATUS from the core, latches event pulses into INT_STATUS and produces irq. Fix the parameter list. State that all core-side signals are synchronous to aclk, that the block contains no CDC logic, and that any clock crossing is the integrator's responsibility.",
+      "spec_evidence": [
+        {
+          "section": "P1",
+          "quote": "`ctrl_regs` \u2013 AXI4-Lite register block"
+        },
+        {
+          "section": "P2",
+          "quote": "AXI4-Lite slave, 32-bit data, 4 KB window (12-bit address)"
+        },
+        {
+          "section": "P3",
+          "quote": "IP version"
+        },
+        {
+          "section": "P3",
+          "quote": "Live core status"
+        },
+        {
+          "section": "P4",
+          "quote": "Low-performance control path; simplicity over throughput."
+        }
+      ],
+      "decisions": [
+        {
+          "id": "D1",
+          "topic": "Source of the VERSION register value",
+          "options": [
+            "Verilog parameter (e.g. VERSION) driven as a read-only constant",
+            "Input port",
+            "Hard-coded constant"
+          ],
+          "status": "decided",
+          "choice": "Verilog parameter returned as a constant on reads of 0x018.",
+          "rationale": "The reset column for VERSION says 'param'.",
+          "impact": "low",
+          "confidence": "high",
+          "question": ""
+        },
+        {
+          "id": "D2",
+          "topic": "Clock domain of core-side inputs (STATUS fields, event pulses) and outputs (CTRL fields, CMD pulses)",
+          "options": [
+            "Same aclk domain, no synchronizers",
+            "Separate core clock with CDC synchronizers and pulse handshakes"
+          ],
+          "status": "decided",
+          "choice": "All core-side signals (sts_*, evt_set, cmd_* pulses) are synchronous to aclk. ctrl_regs contains no CDC logic. If the core runs on a different clock, the integrator provides the crossing: 2-flop synchronizers for single bits, and a handshake or Gray-code crossing for FIFO_LEVEL.",
+          "rationale": "User answer Q1.",
+          "impact": "high",
+          "confidence": "high",
+          "question": ""
+        }
+      ],
+      "depends_on": [],
+      "output_section": [
+        "Overview",
+        "Parameters",
+        "Assumptions & Open Questions"
+      ],
+      "done_when": [
+        "The Overview lists all 7 registers with offsets and their role toward the core.",
+        "The Parameters table includes VERSION, with width and default, plus any fixed address/data widths (12/32).",
+        "The Overview states that ctrl_regs is single-clock (aclk) with no CDC logic.",
+        "The Assumptions section records the integrator's CDC responsibility: 2-flop synchronizers for single bits, and a handshake or Gray-code crossing for FIFO_LEVEL."
+      ]
+    },
+    {
+      "id": "S2",
+      "title": "Define AXI4-Lite ports plus core-side ports (CTRL fields, CMD pulses, status inputs, event pulses, irq)",
+      "goal": "Produce the full port table. Include all five AXI4-Lite channels with 12-bit addresses and 32-bit data with WSTRB. Include core outputs (en, mode[2:0], prescale[7:0], start/abort/soft_rst pulses, irq) and core inputs (busy, fifo_empty, fifo_full, fifo_level[7:0], done/err/ovf/unf event pulses). All are synchronous to aclk.",
+      "spec_evidence": [
+        {
+          "section": "P2",
+          "quote": "Clock `aclk`, reset `aresetn`."
+        },
+        {
+          "section": "P3",
+          "quote": "[15:8] FIFO_LEVEL"
+        },
+        {
+          "section": "P3",
+          "quote": "Set by hardware event pulses, write 1 to clear"
+        },
+        {
+          "section": "P3",
+          "quote": "Writing 1 produces a one-cycle pulse to the core; reads as 0"
+        }
+      ],
+      "decisions": [
+        {
+          "id": "D3",
+          "topic": "Form of hardware event inputs to INT_STATUS",
+          "options": [
+            "Four active-high inputs; any cycle the input is high sets the bit",
+            "Edge-detected inputs (set on rising edge only)",
+            "Multi-bit event bus with a valid strobe"
+          ],
+          "status": "defaulted",
+          "choice": "Four independent active-high inputs (evt_set[3:0]). A bit is set in every cycle its input is high, so the core is expected to pulse for one aclk cycle.",
+          "rationale": "'event pulses' implies single-cycle strobes from the core, and the inputs are synchronous to aclk (Q1), so no edge detector is needed. This keeps the logic simplest.",
+          "impact": "low",
+          "confidence": "medium",
+          "question": "Are the DONE/ERR/OVF/UNF event inputs guaranteed single-cycle pulses on aclk, or can they be held high and need edge detection?"
+        }
+      ],
+      "depends_on": [
+        "S1"
+      ],
+      "output_section": [
+        "Interface"
+      ],
+      "done_when": [
+        "Every AXI4-Lite signal is listed with direction and width. Whether AWPROT/ARPROT are present but ignored is stated.",
+        "Every core-side signal is listed with direction, width, pulse/level semantics, and the note that it is synchronous to aclk.",
+        "irq is listed with its polarity."
+      ]
+    },
+    {
+      "id": "S3",
+      "title": "Address decode on addr[11:2] with SLVERR for unmapped offsets and RO/WO access rules",
+      "goal": "Specify how the 12-bit address maps to the 7 registers. State the response for unmapped offsets and for writes to RO registers (STATUS, VERSION). State that reads of the WO register CMD return 0. Decode is shared by the read and write paths.",
+      "spec_evidence": [
+        {
+          "section": "P2",
+          "quote": "Unmapped addresses \u2192 SLVERR."
+        },
+        {
+          "section": "P3",
+          "quote": "Writing 1 produces a one-cycle pulse to the core; reads as 0"
+        },
+        {
+          "section": "P2",
+          "quote": "Reserved bits read 0, writes ignored."
+        }
+      ],
+      "decisions": [
+        {
+          "id": "D4",
+          "topic": "Response for writes to RO registers and treatment of addr[1:0]",
+          "options": [
+            "Write to STATUS/VERSION ignored with OKAY; addr[1:0] ignored",
+            "Write to RO returns SLVERR",
+            "Unaligned addresses return SLVERR"
+          ],
+          "status": "defaulted",
+          "choice": "Writes to STATUS/VERSION are silently ignored with an OKAY response. addr[1:0] is ignored for decode. Only offsets 0x000-0x018 are mapped; every other word in the 4 KB window returns SLVERR on both read and write.",
+          "rationale": "The spec only demands SLVERR for unmapped addresses. Treating RO writes like writes to reserved bits ('writes ignored') is the common convention.",
+          "impact": "low",
+          "confidence": "medium",
+          "question": "Should a write to a read-only register (STATUS, VERSION) return OKAY and be ignored, or return SLVERR? Should unaligned addresses (addr[1:0] != 0) be an error?"
+        }
+      ],
+      "depends_on": [
+        "S2"
+      ],
+      "output_section": [
+        "Datapath",
+        "Corner Cases & Error Handling"
+      ],
+      "done_when": [
+        "A decode table maps each offset to register select, read access, write access and BRESP/RRESP.",
+        "The CMD read value (0) and the RO write behaviour are stated.",
+        "The treatment of addr[1:0] is stated."
+      ]
+    },
+    {
+      "id": "S4",
+      "title": "Write path: decoupled AW/W capture, single outstanding write, B response",
+      "goal": "Design the write-channel control. Capture AW and W independently in holding registers with per-channel 'held' flags. Commit the register write in the cycle both are held, then raise BVALID with BRESP from decode and hold it until BREADY. Accept no new AW/W while a write is pending.",
+      "spec_evidence": [
+        {
+          "section": "P4",
+          "quote": "The AW and W channels may arrive in any order or together; don't assume they're aligned."
+        },
+        {
+          "section": "P4",
+          "quote": "Low-performance control path; simplicity over throughput."
+        }
+      ],
+      "decisions": [
+        {
+          "id": "D5",
+          "topic": "Write channel acceptance architecture",
+          "options": [
+            "Independent AW and W holding registers, commit when both held, one outstanding write, registered BVALID",
+            "Wait for AWVALID&&WVALID together before asserting both READYs",
+            "Pipelined acceptance with multiple outstanding writes"
+          ],
+          "status": "defaulted",
+          "choice": "Use independent AW/W holding registers. AWREADY/WREADY drop once their channel is held. Commit when both are held. A registered BVALID is held until BREADY, and AW/W readiness is re-enabled only after the B handshake.",
+          "rationale": "This handles any arrival order without depending on the master asserting both VALIDs. It is simple and fits the low-throughput intent.",
+          "impact": "medium",
+          "confidence": "high",
+          "question": "Is a single-outstanding-write slave with independent AW/W buffering (at least 3 cycles per write) acceptable, or is higher write throughput needed?"
+        }
+      ],
+      "depends_on": [
+        "S3"
+      ],
+      "output_section": [
+        "Control Logic",
+        "Datapath"
+      ],
+      "done_when": [
+        "A state or flag description covers AW-first, W-first and simultaneous arrival.",
+        "The commit strobe that feeds register update logic is defined (one cycle per write).",
+        "BVALID/BRESP behaviour under BREADY backpressure is defined, and no handshake can be dropped or duplicated."
+      ]
+    },
+    {
+      "id": "S5",
+      "title": "Read path: AR capture, side-effect-free read mux, R response independent of writes",
+      "goal": "Design the read-channel control. Accept AR when no read response is pending, register RDATA from the read mux and RRESP from decode, and hold RVALID until RREADY. Define the read mux: CTRL, STATUS from live aclk-synchronous inputs, INT_STATUS, INT_ENABLE, CMD=0, SCRATCH, VERSION, reserved bits=0.",
+      "spec_evidence": [
+        {
+          "section": "P2",
+          "quote": "Reserved bits read 0, writes ignored."
+        },
+        {
+          "section": "P3",
+          "quote": "Live core status"
+        },
+        {
+          "section": "P4",
+          "quote": "Low-performance control path; simplicity over throughput."
+        }
+      ],
+      "decisions": [
+        {
+          "id": "D6",
+          "topic": "Concurrency between read and write paths",
+          "options": [
+            "Fully independent read and write paths operating concurrently",
+            "Single shared FSM serializing reads and writes"
+          ],
+          "status": "defaulted",
+          "choice": "The read and write paths are independent and may run in the same cycle. Reads have no side effects, so no arbitration is needed.",
+          "rationale": "No register has read side effects (W1C clears only on write), so concurrency is free. AXI expects the channels to be independent.",
+          "impact": "low",
+          "confidence": "high",
+          "question": "Is it acceptable for reads and writes to proceed concurrently? A read in the same cycle as a write would return the pre-write value."
+        }
+      ],
+      "depends_on": [
+        "S3"
+      ],
+      "output_section": [
+        "Control Logic",
+        "Datapath"
+      ],
+      "done_when": [
+        "The read mux contents are given per offset, with reserved bits forced to 0.",
+        "Ordering is stated: a STATUS read samples the core inputs at AR acceptance or at the cycle RDATA is registered.",
+        "The MA states that STATUS inputs are sampled directly with no synchronizers, per the aclk-synchronous assumption.",
+        "RVALID/RRESP behaviour under RREADY backpressure is defined."
+      ]
+    },
+    {
+      "id": "S6",
+      "title": "Register storage with byte-strobe write enables and reserved-bit masking (CTRL, INT_ENABLE, SCRATCH)",
+      "goal": "Specify the flops actually stored: CTRL EN/MODE/PRESCALE, INT_ENABLE[3:0], SCRATCH[31:0]. Specify how WSTRB byte lanes gate each field and that reserved bits have no storage. State the reset values, including PRESCALE=0x01.",
+      "spec_evidence": [
+        {
+          "section": "P2",
+          "quote": "WSTRB must be honoured."
+        },
+        {
+          "section": "P3",
+          "quote": "[15:8] PRESCALE | 0x01 | Clock prescaler"
+        },
+        {
+          "section": "P2",
+          "quote": "Reserved bits read 0, writes ignored."
+        }
+      ],
+      "decisions": [
+        {
+          "id": "D7",
+          "topic": "Scope of WSTRB gating",
+          "options": [
+            "WSTRB gates every writable bit, including W1C clears and CMD pulse bits",
+            "WSTRB applies only to RW storage registers"
+          ],
+          "status": "decided",
+          "choice": "WSTRB byte lanes gate all write effects. This covers RW storage, W1C clears in INT_STATUS (lane 0) and CMD pulses (lane 0 for START/ABORT, lane 3 for SOFT_RST).",
+          "rationale": "The spec says 'WSTRB must be honoured' with no exceptions.",
+          "impact": "low",
+          "confidence": "high",
+          "question": ""
+        }
+      ],
+      "depends_on": [
+        "S4"
+      ],
+      "output_section": [
+        "Datapath"
+      ],
+      "done_when": [
+        "Each stored field is listed with its bit range, the byte lane that enables it, and its reset value.",
+        "No flops are allocated for reserved bits.",
+        "A byte-lane-to-field mapping table covers CTRL, INT_ENABLE, SCRATCH, INT_STATUS and CMD."
+      ]
+    },
+    {
+      "id": "S7",
+      "title": "INT_STATUS set/clear priority so event pulses are never lost, and irq generation",
+      "goal": "Define per-bit next-state logic: next = (cur & ~clr) | set. clr = commit & sel_INT_STATUS & WSTRB[0] & WDATA[i]. set = evt_set[i], used directly because it is synchronous to aclk. A same-cycle event therefore wins over a clear. Define irq = |(INT_STATUS & INT_ENABLE) and its timing.",
+      "spec_evidence": [
+        {
+          "section": "P4",
+          "quote": "Hardware event pulses must never be lost, even if software is clearing at the same time."
+        },
+        {
+          "section": "P3",
+          "quote": "`irq = |(INT_STATUS & INT_ENABLE)`"
+        },
+        {
+          "section": "P3",
+          "quote": "Set by hardware event pulses, write 1 to clear"
+        }
+      ],
+      "decisions": [
+        {
+          "id": "D8",
+          "topic": "Priority when a hardware event and a software W1C hit the same bit in the same cycle",
+          "options": [
+            "Set wins (bit remains 1)",
+            "Clear wins"
+          ],
+          "status": "decided",
+          "choice": "Set wins. The bit stays 1 after a simultaneous event and clear.",
+          "rationale": "The spec explicitly requires that event pulses never be lost during concurrent clearing.",
+          "impact": "medium",
+          "confidence": "high",
+          "question": ""
+        },
+        {
+          "id": "D9",
+          "topic": "Whether irq is registered or combinational",
+          "options": [
+            "Registered irq flop (1-cycle latency, glitch-free)",
+            "Combinational from INT_STATUS/INT_ENABLE flops"
+          ],
+          "status": "defaulted",
+          "choice": "irq is driven from a dedicated flop computing |(INT_STATUS_next & INT_ENABLE_next), or registered one cycle after the status update. The output is glitch-free.",
+          "rationale": "irq often goes to an interrupt controller that may be in another domain, so a registered output is safer. The added latency is irrelevant for a low-performance path.",
+          "impact": "low",
+          "confidence": "medium",
+          "question": "Should irq be a registered output (glitch-free, may lag one cycle), or purely combinational from INT_STATUS & INT_ENABLE?"
+        }
+      ],
+      "depends_on": [
+        "S4",
+        "S6"
+      ],
+      "output_section": [
+        "Datapath",
+        "Control Logic",
+        "Corner Cases & Error Handling"
+      ],
+      "done_when": [
+        "The per-bit next-state equation is written with the set-dominant term.",
+        "irq timing relative to an event pulse and to an INT_ENABLE write is stated in cycles.",
+        "Writing 0 to INT_STATUS is shown to have no effect, and WSTRB[0]=0 is shown to suppress the clear."
+      ]
+    },
+    {
+      "id": "S8",
+      "title": "CMD self-clearing pulses (START, ABORT, SOFT_RST) and SOFT_RST scope",
+      "goal": "Define how a committed write to 0x010 with bit=1 and the matching WSTRB lane produces exactly one aclk-cycle pulse on start/abort/soft_rst. Define pulse timing relative to the write commit, and whether SOFT_RST affects ctrl_regs state. Note that pulses are aclk-domain only; any crossing to another clock is the integrator's job.",
+      "spec_evidence": [
+        {
+          "section": "P3",
+          "quote": "Writing 1 produces a one-cycle pulse to the core; reads as 0"
+        },
+        {
+          "section": "P3",
+          "quote": "[31] SOFT_RST"
+        }
+      ],
+      "decisions": [
+        {
+          "id": "D10",
+          "topic": "Effect of SOFT_RST on the register block itself",
+          "options": [
+            "Pulse to the core only; ctrl_regs registers unaffected",
+            "Pulse also resets ctrl_regs registers to reset values",
+            "Pulse resets only INT_STATUS"
+          ],
+          "status": "defaulted",
+          "choice": "SOFT_RST only produces a one-cycle pulse to the core. CTRL/INT_ENABLE/SCRATCH/INT_STATUS are unaffected.",
+          "rationale": "The spec describes CMD bits as 'a one-cycle pulse to the core'. Resetting the bus-side registers mid-transaction adds complexity and risk.",
+          "impact": "medium",
+          "confidence": "medium",
+          "question": "Should CMD.SOFT_RST reset any ctrl_regs registers (CTRL, INT_ENABLE, INT_STATUS, SCRATCH), or only send a reset pulse to the core?"
+        }
+      ],
+      "depends_on": [
+        "S4",
+        "S6"
+      ],
+      "output_section": [
+        "Datapath",
+        "Control Logic"
+      ],
+      "done_when": [
+        "Pulse outputs are registered, with the cycle offset from the write commit given.",
+        "Simultaneous START+ABORT in one write is shown to produce both pulses, and the MA documents this as a core-side concern.",
+        "Back-to-back CMD writes are shown to produce separate pulses."
+      ]
+    },
+    {
+      "id": "S9",
+      "title": "aresetn style and reset values for AXI handshake and register flops in the single aclk domain",
+      "goal": "Specify reset polarity and style. Assert all AXI VALID/READY-related outputs to safe values during reset. Apply the P3 reset values (PRESCALE=0x01, others 0), and drive core pulses and irq low in reset. Document aclk as the only clock, with no synchronizer flops.",
+      "spec_evidence": [
+        {
+          "section": "P2",
+          "quote": "Clock `aclk`, reset `aresetn`."
+        },
+        {
+          "section": "P3",
+          "quote": "[15:8] PRESCALE | 0x01 | Clock prescaler"
+        }
+      ],
+      "decisions": [
+        {
+          "id": "D11",
+          "topic": "Reset style for aresetn",
+          "options": [
+            "Synchronous active-low (AXI convention)",
+            "Asynchronous assert, synchronous deassert"
+          ],
+          "status": "defaulted",
+          "choice": "Synchronous active-low reset on aclk for all flops.",
+          "rationale": "The AXI convention samples aresetn on aclk, and the reset is assumed externally synchronized. This is the simplest choice for FPGA and ASIC.",
+          "impact": "low",
+          "confidence": "medium",
+          "question": "Should aresetn be treated as a synchronous active-low reset, or as asynchronous assert / synchronous deassert?"
+        }
+      ],
+      "depends_on": [
+        "S6",
+        "S7",
+        "S8"
+      ],
+      "output_section": [
+        "Clocking & Reset"
+      ],
+      "done_when": [
+        "A single clock domain (aclk) with no CDC logic is documented, with a reference to the integrator's CDC responsibility.",
+        "Reset values are listed for every flop, including holding registers, flags, BVALID/RVALID, irq and pulses.",
+        "Behaviour on reset deassertion is defined, including the first cycle in which AWREADY/WREADY/ARREADY may assert."
+      ]
+    },
+    {
+      "id": "S10",
+      "title": "Cycle-level timing for write, read, CMD pulse and irq paths",
+      "goal": "Document the latency of each transaction type. For writes: AW/W accept, commit, BVALID. For reads: AR accept to RVALID. Also give CMD commit to core pulse and event to INT_STATUS to irq, with waveform-style tables for aligned and misaligned AW/W arrival.",
+      "spec_evidence": [
+        {
+          "section": "P4",
+          "quote": "The AW and W channels may arrive in any order or together; don't assume they're aligned."
+        },
+        {
+          "section": "P4",
+          "quote": "Low-performance control path; simplicity over throughput."
+        }
+      ],
+      "decisions": [],
+      "depends_on": [
+        "S4",
+        "S5",
+        "S7",
+        "S8"
+      ],
+      "output_section": [
+        "Timing & Pipeline",
+        "Block Diagram"
+      ],
+      "done_when": [
+        "A cycle table is given for each case: AW-first, W-first, simultaneous, read, CMD pulse, event\u2192irq.",
+        "Minimum cycles per write and per read are stated.",
+        "The block diagram shows the AW/W holding regs, write control, decode, register file, INT logic, CMD pulse gen, read mux and R/B response regs. All core-side signals connect directly in the aclk domain, with no synchronizer blocks."
+      ]
+    },
+    {
+      "id": "S11",
+      "title": "Corner cases and verification plan targeting AW/W ordering, set-vs-clear races, WSTRB and SLVERR",
+      "goal": "Enumerate corner cases and the verification strategy. Cases: AW/W ordering permutations, backpressure on B/R, event coincident with W1C, partial WSTRB on every register, unmapped/RO accesses, CMD pulse width and readback, reset values, and concurrent read and write. Collect the remaining assumptions and open questions, including the integrator's CDC responsibility.",
+      "spec_evidence": [
+        {
+          "section": "P4",
+          "quote": "Hardware event pulses must never be lost, even if software is clearing at the same time."
+        },
+        {
+          "section": "P2",
+          "quote": "WSTRB must be honoured."
+        },
+        {
+          "section": "P2",
+          "quote": "Unmapped addresses \u2192 SLVERR."
+        }
+      ],
+      "decisions": [],
+      "depends_on": [
+        "S9",
+        "S10"
+      ],
+      "output_section": [
+        "Corner Cases & Error Handling",
+        "Verification Plan",
+        "Assumptions & Open Questions"
+      ],
+      "done_when": [
+        "The corner case list covers every item in the goal, each with its expected behaviour.",
+        "The verification plan names an AXI4-Lite VIP or BFM with randomized AW/W skew and READY backpressure, and drives core-side stimulus synchronously on aclk.",
+        "A register model/scoreboard is included.",
+        "Assertions are included: one pulse per CMD write, no lost events, VALID stable until READY.",
+        "Functional coverage is included: every offset x read/write x WSTRB pattern, and the event+clear same-cycle bin.",
+        "The Assumptions section records D2 as resolved: single aclk domain, with the integrator providing CDC (2-flop sync for bits, handshake/Gray for FIFO_LEVEL).",
+        "The Assumptions section lists every remaining defaulted decision (D3-D6, D9-D11) with its open question."
+      ]
+    }
+  ],
+  "assumptions": [
+    {
+      "decision_id": "D3",
+      "topic": "Form of hardware event inputs to INT_STATUS",
+      "assumed": "Four independent active-high inputs (evt_set[3:0]). A bit is set in every cycle its input is high, so the core is expected to pulse for one aclk cycle.",
+      "impact": "low",
+      "confidence": "medium",
+      "question": "Are the DONE/ERR/OVF/UNF event inputs guaranteed single-cycle pulses on aclk, or can they be held high and need edge detection?"
+    },
+    {
+      "decision_id": "D4",
+      "topic": "Response for writes to RO registers and treatment of addr[1:0]",
+      "assumed": "Writes to STATUS/VERSION are silently ignored with an OKAY response. addr[1:0] is ignored for decode. Only offsets 0x000-0x018 are mapped; every other word in the 4 KB window returns SLVERR on both read and write.",
+      "impact": "low",
+      "confidence": "medium",
+      "question": "Should a write to a read-only register (STATUS, VERSION) return OKAY and be ignored, or return SLVERR? Should unaligned addresses (addr[1:0] != 0) be an error?"
+    },
+    {
+      "decision_id": "D5",
+      "topic": "Write channel acceptance architecture",
+      "assumed": "Use independent AW/W holding registers. AWREADY/WREADY drop once their channel is held. Commit when both are held. A registered BVALID is held until BREADY, and AW/W readiness is re-enabled only after the B handshake.",
+      "impact": "medium",
+      "confidence": "high",
+      "question": "Is a single-outstanding-write slave with independent AW/W buffering (at least 3 cycles per write) acceptable, or is higher write throughput needed?"
+    },
+    {
+      "decision_id": "D6",
+      "topic": "Concurrency between read and write paths",
+      "assumed": "The read and write paths are independent and may run in the same cycle. Reads have no side effects, so no arbitration is needed.",
+      "impact": "low",
+      "confidence": "high",
+      "question": "Is it acceptable for reads and writes to proceed concurrently? A read in the same cycle as a write would return the pre-write value."
+    },
+    {
+      "decision_id": "D9",
+      "topic": "Whether irq is registered or combinational",
+      "assumed": "irq is driven from a dedicated flop computing |(INT_STATUS_next & INT_ENABLE_next), or registered one cycle after the status update. The output is glitch-free.",
+      "impact": "low",
+      "confidence": "medium",
+      "question": "Should irq be a registered output (glitch-free, may lag one cycle), or purely combinational from INT_STATUS & INT_ENABLE?"
+    },
+    {
+      "decision_id": "D10",
+      "topic": "Effect of SOFT_RST on the register block itself",
+      "assumed": "SOFT_RST only produces a one-cycle pulse to the core. CTRL/INT_ENABLE/SCRATCH/INT_STATUS are unaffected.",
+      "impact": "medium",
+      "confidence": "medium",
+      "question": "Should CMD.SOFT_RST reset any ctrl_regs registers (CTRL, INT_ENABLE, INT_STATUS, SCRATCH), or only send a reset pulse to the core?"
+    },
+    {
+      "decision_id": "D11",
+      "topic": "Reset style for aresetn",
+      "assumed": "Synchronous active-low reset on aclk for all flops.",
+      "impact": "low",
+      "confidence": "medium",
+      "question": "Should aresetn be treated as a synchronous active-low reset, or as asynchronous assert / synchronous deassert?"
+    }
+  ]
+}

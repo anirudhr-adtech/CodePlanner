@@ -1,0 +1,145 @@
+{
+  "score": {
+    "key_decisions": 14,
+    "matches": 10,
+    "differs": 4,
+    "missing": 0,
+    "spec_silent": 12,
+    "spec_silent_differs": 4,
+    "material_differs": 1,
+    "needless_questions": 0,
+    "coverage": 1.0,
+    "agreement": 0.714,
+    "sound": 0.929
+  },
+  "key_decisions": [
+    {
+      "decision": "Prescaler structure",
+      "ma_choice": "One global prescaler that produces a single-cycle tick enable every PRESC+1 clocks, shared by all channels and held at 0 while GEN=0.",
+      "spec_settles_it": true,
+      "in_plan": "matches",
+      "plan_choice": "One global 16-bit prescaler that ticks every PRESC+1 clocks, is fanned out to all channels and is held at 0 while GEN=0.",
+      "difference": "none",
+      "note": "PRESC is a global CTRL field, so the spec effectively implies a shared prescaler."
+    },
+    {
+      "decision": "Handling of a PRESC change mid-count",
+      "ma_choice": "Any write to CTRL clears presc_cnt_q, so the new PRESC applies from a clean count. This restarts the current tick for all channels.",
+      "spec_settles_it": false,
+      "in_plan": "differs",
+      "plan_choice": "PRESC applies immediately against the live value. A >= compare wraps the counter at once if PRESC is lowered below it. CTRL writes do not clear the counter.",
+      "difference": "equivalent",
+      "note": "Both avoid the 2^16 long-tick lock-up. Only the plan avoids disturbing the tick phase on unrelated CTRL writes (e.g. GEN toggles)."
+    },
+    {
+      "decision": "Double-buffering scheme and readback",
+      "ma_choice": "Software-visible preload registers plus internal active registers for PERIOD, DUTY and CENTER, copied at the period boundary. Reads return the preload value.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "Preload plus active shadow, loaded at the boundary. Reads return the last software-written preload.",
+      "difference": "none",
+      "note": "The spec mandates shadowing but not which value is read back. Both chose the preload."
+    },
+    {
+      "decision": "Edge-aligned counting and compare",
+      "ma_choice": "Counter runs 0..PERIOD-1, so the period is exactly PERIOD ticks. The boundary is the wrap to 0 and the output is active while cnt < DUTY.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "Counter runs 0..PERIOD-1 and wraps, giving exactly PERIOD ticks. The boundary is the wrap and the output is active for DUTY ticks from the start.",
+      "difference": "none",
+      "note": "The spec leaves PERIOD vs PERIOD+1 open."
+    },
+    {
+      "decision": "Center-aligned counter sequence and compare",
+      "ma_choice": "Counter goes up 0..PERIOD-1, holds at the top, goes down to 0 and holds at the bottom, giving a symmetric 2*PERIOD ticks. Active while cnt >= PERIOD-DUTY, so exactly 2*DUTY ticks centred at the top. Boundary is only at the bottom.",
+      "spec_settles_it": false,
+      "in_plan": "differs",
+      "plan_choice": "Triangle 0 up to PERIOD and back down to 0 (2*PERIOD ticks) with no turning-point holds. Active while count > PERIOD-DUTY. Boundary and shadow load only at the bottom, pulse centred at the top.",
+      "difference": "equivalent",
+      "note": "Same architecture: up/down direction flag, single bottom boundary, pulse at the top. The plan's count range reaches PERIOD, so COUNT readback differs. Without holds, its compare does not obviously give exactly 2*DUTY symmetric ticks; this needs care at detailing."
+    },
+    {
+      "decision": "PERIOD = 0 behaviour",
+      "ma_choice": "The channel is treated as off (always inactive) regardless of DUTY. The counter holds at 0 and a boundary fires every tick.",
+      "spec_settles_it": false,
+      "in_plan": "differs",
+      "plan_choice": "The counter holds at 0 and every tick is a boundary. The output follows the DUTY rules: inactive if DUTY=0, otherwise always active.",
+      "difference": "material",
+      "note": "Visible output differs for PERIOD=0 with DUTY>0 (active vs inactive). The plan is closer to a literal reading of 'DUTY >= PERIOD \u2192 always active'."
+    },
+    {
+      "decision": "Enable/disable semantics",
+      "ma_choice": "run = GEN & EN. Clearing either stops the channel immediately and the output goes to its inactive level the next cycle. Counter and dir are cleared to 0.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "Immediate stop with output going to the POL level next cycle. Counter and dir are cleared while stopped. Re-enable starts a fresh period at 0.",
+      "difference": "none",
+      "note": "Resolved by Q1."
+    },
+    {
+      "decision": "Shadow behaviour while stopped",
+      "ma_choice": "While !run the shadows load continuously from the preloads, so enabling uses the latest values without waiting for a boundary.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "Shadows are transparent while stopped (load = ~run | boundary).",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Mode change at the boundary",
+      "ma_choice": "CENTER is shadowed. On shadow load dir resets to 0, so the new mode starts cleanly from the bottom.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "A CENTER change at the boundary restarts the counter at 0 with dir=0 in the new mode.",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "POL update timing",
+      "ma_choice": "POL is not shadowed and applies one cycle after the write, which may create one edge.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "POL is not double-buffered and applies on the next cycle.",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Output stage",
+      "ma_choice": "A single output flop per channel after compare, overrides, run gating and polarity XOR. Latency is 1 cycle.",
+      "spec_settles_it": true,
+      "in_plan": "matches",
+      "plan_choice": "Each pwm_out bit is driven directly by a flop combining compare, DUTY overrides, enable gating and POL. Latency is 1 cycle.",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Reset style",
+      "ma_choice": "Async assert, sync deassert. All flops reset to 0, so outputs are low after reset.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "Async active-low reset on all flops, with deassertion assumed synchronised externally. Everything resets to 0.",
+      "difference": "none",
+      "note": "The plan places the deassert synchroniser outside the block. This is effectively the same."
+    },
+    {
+      "decision": "Bus read path and collision",
+      "ma_choice": "Registered rdata with 1-cycle latency. Unmapped and reserved bits read 0. RO and unmapped writes are ignored. A simultaneous read and write returns the pre-write value.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "rdata flop loaded on reg_rd. Unimplemented slots read 0 and ignore writes. COUNT writes are ignored. A same-cycle read returns the pre-write value.",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Parameterisation of widths",
+      "ma_choice": "NUM_CH (1-8) plus configurable CNT_W and PRESC_W (up to 16), with an elaboration check on NUM_CH.",
+      "spec_settles_it": false,
+      "in_plan": "differs",
+      "plan_choice": "NUM_CH (1-8) only. Counter and prescaler widths are fixed at 16 bits.",
+      "difference": "equivalent",
+      "note": "Minor generality difference with no effect on the register-visible behaviour at the defaults."
+    }
+  ],
+  "needless_questions": [],
+  "summary": "The plan closely tracks the MA on almost every architectural decision: shared prescaler, preload/active shadow scheme with preload readback, edge-aligned 0..PERIOD-1 counting, immediate stop with counters cleared and transparent shadows, immediate POL, a single registered output, reset style and bus behaviour. One difference is material: for PERIOD=0 with DUTY>0, the plan drives always-active while the MA treats the channel as off. Two differences are equivalent. The plan handles a PRESC change with a >= wrap instead of clearing the prescaler on any CTRL write. Its center-aligned triangle counts to PERIOD without turning-point holds, which changes the COUNT range and makes exact 2*DUTY symmetry less certain. The only question asked (Q1) addressed a real gap in the spec."
+}

@@ -1,0 +1,16 @@
+[
+  {
+    "id": "Q1",
+    "decision_id": "D1",
+    "question": "For v1, is it acceptable to require SRC, DST and LEN to be 4-byte aligned (misaligned programming flagged as an error), or must byte-granular copies be supported?",
+    "in_doc": true,
+    "answer": "Word-aligned only is acceptable for v1. SRC, DST and LEN must all have bits [1:0] = 0. If any is misaligned at START, the channel sets ERR with ERR_CODE 3 (configuration error), never becomes busy, and generates no bus traffic. Byte-granular copies are not required in v1."
+  },
+  {
+    "id": "Q2",
+    "decision_id": "D3",
+    "question": "Is roughly half of peak bandwidth (read burst, then write burst, no overlap) acceptable for v1, or must reads and writes overlap?",
+    "in_doc": true,
+    "answer": "No overlap is acceptable for v1. Each burst is read completely into the 16-word buffer before its write burst starts, which gives about 41% of port peak (~1.64 B/cycle for 16-beat bursts). Read/write overlap, using a 2\u00d7MAX_BURST FIFO and issuing the next AR while the current W streams, is deferred to v2."
+  }
+]

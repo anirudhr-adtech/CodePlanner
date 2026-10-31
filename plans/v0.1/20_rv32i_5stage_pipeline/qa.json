@@ -1,0 +1,16 @@
+[
+  {
+    "id": "Q1",
+    "decision_id": "D3",
+    "question": "With a 1-cycle synchronous imem, may the core drive the imem address combinationally from its next-PC logic, so that the SRAM output feeds ID directly? Or should the imem address be driven only from a registered PC?",
+    "in_doc": true,
+    "answer": "Yes. The imem address is driven combinationally from the next-PC mux: imem_addr = pc_next. pc_f is registered from pc_next, so imem_rdata in the next cycle lines up with pc_f in IF and is then captured into IF/ID. On a load-use stall or while halted, imem_en is deasserted so the SRAM holds its output. On a redirect, the address becomes ex_target and the younger instructions in IF/ID are squashed by clearing their valid bits. During reset, the address is RESET_PC with imem_en = 1."
+  },
+  {
+    "id": "Q2",
+    "decision_id": "D12",
+    "question": "R11 is TBD: when the core decodes an illegal instruction, should it treat it as a NOP and flag it on an output, halt the core with an error output, or silently treat it as a NOP?",
+    "in_doc": true,
+    "answer": "Halt the core with an error output. Illegal encodings, ECALL and EBREAK trap in EX and halt the core: halted is asserted (registered) and halt_pc gives the trapping PC. Older instructions drain and retire. The trapping instruction does not retire, and younger instructions are flushed. Fetch stops, and only rst exits the halt."
+  }
+]

@@ -1,0 +1,16 @@
+[
+  {
+    "id": "Q1",
+    "decision_id": "D2",
+    "question": "Is the tap count N fixed at build time (a generic), or must one bitstream switch between e.g. 16 and 64 taps at run time?",
+    "in_doc": true,
+    "answer": "Fixed at build time: N_TAPS is a synthesis parameter (default 16, legal range 2\u201364, even or odd). Only coefficient values change at run time, through the shadow bank and commit."
+  },
+  {
+    "id": "Q2",
+    "decision_id": "D12",
+    "question": "Do all 32 channels always use the same coefficients, or must each channel be programmable with its own filter?",
+    "in_doc": false,
+    "answer": "Use the default: Each instance holds its own coefficient bank and write port; the wrapper can broadcast one write to all channels"
+  }
+]

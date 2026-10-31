@@ -1,0 +1,154 @@
+{
+  "score": {
+    "key_decisions": 15,
+    "matches": 13,
+    "differs": 1,
+    "missing": 1,
+    "spec_silent": 14,
+    "spec_silent_differs": 1,
+    "material_differs": 0,
+    "needless_questions": 0,
+    "coverage": 0.933,
+    "agreement": 0.867,
+    "sound": 0.933
+  },
+  "key_decisions": [
+    {
+      "decision": "Write-channel acceptance structure",
+      "ma_choice": "Independent one-entry AW and W holding registers with full flags. do_write fires when both are held and B is free. One outstanding write.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "Independent AW/W holding registers with per-channel held flags, commit when both are held, single outstanding write (D5).",
+      "difference": "none",
+      "note": "The spec requires order independence but not this exact structure; both chose the same one."
+    },
+    {
+      "decision": "When a new AW/W may be accepted relative to the pending B response",
+      "ma_choice": "Holding flags clear on do_write, so the next AW/W can be accepted while BVALID is still pending. Throughput is 1 write per 2 cycles.",
+      "spec_settles_it": false,
+      "in_plan": "differs",
+      "plan_choice": "AW/W readiness is re-enabled only after the B handshake, giving at least 3 cycles per write.",
+      "difference": "equivalent",
+      "note": "Both are single-outstanding and sound. The plan's version is slightly slower but simpler, and the spec favours simplicity."
+    },
+    {
+      "decision": "Registered handshakes with no combinational input-to-output paths",
+      "ma_choice": "All READY/VALID outputs are derived from flops (aw_full_q, w_full_q, rvalid_q, bvalid_q, rst_done_q).",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "READYs come from held flags, BVALID and RDATA/RVALID are registered, and ARREADY depends on no pending read.",
+      "difference": "none",
+      "note": "The plan does not state the no-combinational-path goal explicitly, but its structure yields it."
+    },
+    {
+      "decision": "Read path architecture and latency",
+      "ma_choice": "ARREADY = !rvalid_q. RDATA/RRESP are registered from the decode/mux at ar_fire, giving 1-cycle latency, and the response is held until RREADY.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "Accept AR when no read response is pending, register RDATA/RRESP, hold RVALID until RREADY.",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Read/write concurrency",
+      "ma_choice": "Independent concurrent paths. A same-cycle read returns the pre-write value.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "Independent paths with no arbitration; a same-cycle read sees the pre-write value (D6).",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "INT_STATUS set/clear priority",
+      "ma_choice": "next = (cur & ~clr) | evt_set; set wins over clear.",
+      "spec_settles_it": true,
+      "in_plan": "matches",
+      "plan_choice": "The same set-dominant equation (D8).",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Event input form",
+      "ma_choice": "evt_set[3:0] used directly as level-sampled per-cycle set inputs, with no edge detection.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "Four active-high inputs used directly with no edge detector (D3).",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "irq generation",
+      "ma_choice": "Registered irq_q computed from the next-state values of INT_STATUS and INT_ENABLE.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "A dedicated irq flop computing |(INT_STATUS_next & INT_ENABLE_next) (D9).",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "WSTRB scope",
+      "ma_choice": "WSTRB gates all write effects: byte-merge for RW registers, lane 0 for W1C, lane 0/3 for CMD pulses. WSTRB=0 does nothing.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "WSTRB gates RW storage, W1C clears (lane 0) and CMD pulses (lanes 0 and 3) (D7).",
+      "difference": "none",
+      "note": "The spec says only 'WSTRB must be honoured'. Applying it to W1C and SC bits is an interpretation, and both made it."
+    },
+    {
+      "decision": "CMD self-clearing pulse implementation and SOFT_RST scope",
+      "ma_choice": "cmd_q flops are set for exactly one cycle after do_write and read as 0. SOFT_RST is only an output pulse and does not reset the block.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "Registered one-cycle pulses; SOFT_RST is a pulse to the core only (D10).",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Error response policy",
+      "ma_choice": "SLVERR only for unmapped words (read data 0). Writes to RO registers are ignored with OKAY. addr[1:0] is ignored.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "Identical policy (D4).",
+      "difference": "none",
+      "note": "The SLVERR-for-unmapped part is fixed by the spec. RO-write and alignment handling are choices, and both made the same ones."
+    },
+    {
+      "decision": "Reset style",
+      "ma_choice": "aresetn is a synchronous active-low reset.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "Synchronous active-low reset on all flops (D11).",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "READY behaviour during and just after reset",
+      "ma_choice": "READYs are forced low during reset by ANDing with an rst_done_q flop that rises one cycle after reset release.",
+      "spec_settles_it": false,
+      "in_plan": "missing",
+      "plan_choice": "",
+      "difference": "none",
+      "note": "The plan only says outputs go to 'safe values' and that the first READY cycle should be defined. It makes no choice and introduces no gating flop."
+    },
+    {
+      "decision": "Clocking / CDC",
+      "ma_choice": "Single aclk domain with no CDC inside the block. The integrator handles crossings: 2-flop synchronizers for bits, handshake or Gray code for FIFO_LEVEL.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "The same choice, resolved via Q1 (D2).",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Register storage and parameterisation",
+      "ma_choice": "Storage only for defined bits; CTRL is masked. VERSION and PRESCALE reset are parameters.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "No flops for reserved bits. VERSION is a parameter; PRESCALE resets to 0x01, but as a constant rather than a parameter.",
+      "difference": "none",
+      "note": "The only gap is the minor PRESCALE_RST parameter, which is not an architectural difference."
+    }
+  ],
+  "needless_questions": [],
+  "summary": "The plan tracks the reference MA closely on almost every architecture decision. It matches on decoupled AW/W holding registers, single-outstanding transactions, the registered read path and concurrent read/write, the set-wins W1C rule, the registered irq from next-state values, WSTRB gating of W1C and CMD bits, registered CMD pulses with SOFT_RST as a pulse only, the error policy, synchronous reset and the no-CDC assumption. There is one equivalent difference: the plan re-enables AW/W only after the B handshake (at least 3 cycles per write), whereas the MA accepts the next AW/W during the B response (2 cycles per write). One decision is missing: the MA explicitly gates READYs low during and immediately after reset with an rst_done_q flop, and the plan leaves this as 'safe values' to be defined later. The only question asked (Q1, on CDC) was legitimate, because the spec is silent and the answer shapes the interface and the clocking section."
+}

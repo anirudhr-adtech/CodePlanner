@@ -1,0 +1,23 @@
+[
+  {
+    "id": "Q1",
+    "decision_id": "D5",
+    "question": "Will this FIFO ever be instantiated deep enough to need block RAM / SRAM macros, or is a flop/LUTRAM register array acceptable for all expected sizes?",
+    "in_doc": true,
+    "answer": "Use the async-read register array (distributed/LUT RAM on FPGA, flop array plus read mux on ASIC) for this design. The document says that works for depths up to about 64. Deeper FIFOs (>64 entries) that need block RAM are deferred to a future variant. That variant uses synchronous-read block RAM with a 1-entry output prefetch register to keep FWFT behaviour, selected by a future MEM_STYLE parameter. It is not part of this implementation, even though DEPTH legally ranges up to 65536."
+  },
+  {
+    "id": "Q2",
+    "decision_id": "D8",
+    "question": "When the FIFO is empty and wr_en and rd_en arrive in the same cycle, should the data bypass straight through to the reader, or be stored and delivered next cycle? Should that read be flagged as underflow?",
+    "in_doc": true,
+    "answer": "No bypass. Only the write is accepted, because rd_fire=0 while empty_q=1. The read is ignored and sets the sticky underflow flag. The written word becomes visible on rd_data in the next cycle, when empty deasserts."
+  },
+  {
+    "id": "Q3",
+    "decision_id": "D10",
+    "question": "How does software clear the overflow/underflow flags: per-flag clear pulse inputs from your CSR block, a single shared clear, or should the FIFO include its own register interface? Should a new error in the clear cycle win?",
+    "in_doc": true,
+    "answer": "Use a single shared clear: one `err_clr` input, a single-cycle pulse that clears both `overflow` and `underflow`. The FIFO has no register interface of its own. If `err_clr` and a new error happen in the same cycle, `err_clr` wins and the new error is lost. This rule is marked in the document as still to be confirmed with the software team."
+  }
+]

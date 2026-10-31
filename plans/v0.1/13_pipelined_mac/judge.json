@@ -1,0 +1,147 @@
+{
+  "score": {
+    "key_decisions": 14,
+    "matches": 8,
+    "differs": 4,
+    "missing": 2,
+    "spec_silent": 11,
+    "spec_silent_differs": 4,
+    "material_differs": 2,
+    "needless_questions": 1,
+    "coverage": 0.857,
+    "agreement": 0.571,
+    "sound": 0.714
+  },
+  "key_decisions": [
+    {
+      "decision": "Accumulator width and guard bits",
+      "ma_choice": "ACC_W defaults to 40 bits (Q10.30): a 32-bit product plus 8 guard bits, allowing 512 full-scale products. An elaboration error fires if ACC_W < P_W+8.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "ACC_W defaults to 40 (32 + 8 guard bits), Q10.30.",
+      "difference": "none",
+      "note": "The spec fixes the minimum of 8 guard bits; choosing exactly 40 as the default is a design choice, and both pick it."
+    },
+    {
+      "decision": "Mapping of the pipeline onto the DSP48E2",
+      "ma_choice": "Input regs go to AREG/BREG, the multiply to MREG and the accumulate to PREG. S1/S2 run free with no CE, and only PREG is gated (CEP = v2).",
+      "spec_settles_it": true,
+      "in_plan": "matches",
+      "plan_choice": "Same AREG/BREG, MREG, PREG mapping. The pipeline runs free and the accumulator holds on invalid beats via CEP.",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Total latency / fabric output stage",
+      "ma_choice": "Latency is 4: three DSP stages plus one fabric register for saturation and output.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "Latency is 4, with a fabric output register after the saturation mux (D3).",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Rounding method",
+      "ma_choice": "Round-half-up. RND = 2^(SHIFT-1) is preloaded through the W-mux/C port on clear, so the floor of the slice gives round-to-nearest with no extra adder.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "Round-half-up, with the RND constant injected through the W mux on the clearing sample (D7).",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Accumulator reset value (rounding for a sum started without clear after reset)",
+      "ma_choice": "acc_q resets to RND rather than 0, so the first accumulation after reset is rounded correctly even without in_clr.",
+      "spec_settles_it": false,
+      "in_plan": "missing",
+      "plan_choice": "",
+      "difference": "none",
+      "note": "The plan only lists this as a done_when item with two alternatives (reset P to RND, or require the first sample to carry clear) and does not commit to either."
+    },
+    {
+      "decision": "Where saturation is detected",
+      "ma_choice": "In fabric, in stage S4: a 10-bit all-equal reduction over the upper bits of acc_q>>>SHIFT, with the sign selecting max or min.",
+      "spec_settles_it": false,
+      "in_plan": "differs",
+      "plan_choice": "The DSP48E2 pattern detector (PATTERNDETECT/PATTERNBDETECT with a mask), registered with PREG, followed by a fabric max/min mux.",
+      "difference": "equivalent",
+      "note": "Both are sound. The plan's choice uses up the pattern detector and adds inference risk, but the overall structure barely changes."
+    },
+    {
+      "decision": "Physical accumulator width and overflow-detection semantics",
+      "ma_choice": "The accumulator is physically ACC_W bits and wraps. Overflow is detected only on accumulate cycles, from operand/result signs (same sign in, different sign out). Outputs are wrong after a wrap until the next clear.",
+      "spec_settles_it": false,
+      "in_plan": "differs",
+      "plan_choice": "P is always physically 48 bits and ACC_W is only a logical boundary. The flag is set when P[47:ACC_W-1] is not a sign extension. The output still saturates correctly past ACC_W.",
+      "difference": "material",
+      "note": "Behaviour after the logical limit is exceeded is visibly different: the MA wraps and gives wrong outputs, while the plan keeps the correct saturated output. The detection logic also differs."
+    },
+    {
+      "decision": "How the sticky overflow flag is cleared",
+      "ma_choice": "A dedicated err_clr input clears acc_ovf.",
+      "spec_settles_it": false,
+      "in_plan": "differs",
+      "plan_choice": "Cleared by reset only; the flag stays set across clears, and there is no flag-clear port.",
+      "difference": "material",
+      "note": "This changes the interface by one port and changes when software or a monitor can rearm the flag."
+    },
+    {
+      "decision": "Clear asserted while valid is low",
+      "ma_choice": "in_clr is masked with in_valid, so a clear on an invalid cycle is ignored.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "clear is qualified by valid and ignored on invalid beats (D6).",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Clear mechanism with no dead cycle",
+      "ma_choice": "A pipelined clear (2-deep) drives the W-mux select, so the new sum is product + RND on the same accumulate cycle.",
+      "spec_settles_it": true,
+      "in_plan": "matches",
+      "plan_choice": "A pipelined clear switches the Z/W mux to give P = M + RND, and back-to-back clears are allowed.",
+      "difference": "none",
+      "note": "The plan says Z-mux while the MA says W-mux; the effect is the same."
+    },
+    {
+      "decision": "Full-precision accumulator output port",
+      "ma_choice": "An out_acc[ACC_W] port exposes the raw accumulator, including the RND bias, for debug or chaining.",
+      "spec_settles_it": false,
+      "in_plan": "missing",
+      "plan_choice": "",
+      "difference": "none",
+      "note": "The plan's port list has no accumulator output."
+    },
+    {
+      "decision": "Reset scope for datapath registers",
+      "ma_choice": "All registers, including the data regs, are reset for determinism. Reset may optionally be removed from a1/b1/p2.",
+      "spec_settles_it": false,
+      "in_plan": "differs",
+      "plan_choice": "The valid/clear/last pipelines, flags, output register and P are reset; A/B/M are not reset.",
+      "difference": "equivalent",
+      "note": "The MA explicitly allows the plan's variant."
+    },
+    {
+      "decision": "Parameter set and single-DSP legality limits",
+      "ma_choice": "A_W, B_W, ACC_W and OUT_W plus A_FRAC, B_FRAC and OUT_FRAC, with A_W\u226427, B_W\u226418, ACC_W\u226448 and derived SHIFT/RND.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "Width and fractional-bit parameters, with elaboration checks A\u226427, B\u226418, ACC\u226448 and derived RND/slice localparams.",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Output cadence",
+      "ma_choice": "Every valid sample produces the running rounded and saturated sum; last is only a sideband.",
+      "spec_settles_it": true,
+      "in_plan": "matches",
+      "plan_choice": "The running output appears on every valid product, and last is delayed only.",
+      "difference": "none",
+      "note": ""
+    }
+  ],
+  "needless_questions": [
+    "Q1"
+  ],
+  "summary": "The plan agrees with the MA on the core structure: the 40-bit default accumulator, the AREG/BREG\u2192MREG\u2192PREG mapping, latency 4 with a fabric output stage, round-half-up via RND injection on clear, clear masked by valid, a free-running pipeline with CEP hold, and DSP-legal parameter limits.\n\nIt differs materially in two places:\n- **Overflow semantics.** The plan accumulates over the full 48 bits and flags crossing the logical ACC_W boundary, whereas the MA's ACC_W accumulator wraps and is detected by sign rule.\n- **Sticky-flag clearing.** The plan clears only on reset, whereas the MA has an err_clr port.\n\nIt also differs, equivalently, in two places: saturation detection uses the DSP pattern detector instead of fabric logic, and the data registers are left unreset.\n\nThe plan never commits to resetting the accumulator to RND, and it omits the out_acc debug port.\n\nQ1 (inferred RTL versus primitive) does not change the micro-architecture; the MA accepts either."
+}

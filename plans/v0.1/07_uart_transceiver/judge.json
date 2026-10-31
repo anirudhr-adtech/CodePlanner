@@ -1,0 +1,154 @@
+{
+  "score": {
+    "key_decisions": 15,
+    "matches": 13,
+    "differs": 2,
+    "missing": 0,
+    "spec_silent": 15,
+    "spec_silent_differs": 2,
+    "material_differs": 0,
+    "needless_questions": 0,
+    "coverage": 1.0,
+    "agreement": 0.867,
+    "sound": 1.0
+  },
+  "key_decisions": [
+    {
+      "decision": "Baud generator structure and divider semantics",
+      "ma_choice": "One shared free-running 16x tick generator for TX and RX; baud_div = clock cycles per 16x tick, round(f_clk/(16*baud)).",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "Integer divider in clk cycles per 16x tick, one shared tick generator; TX advances one bit every 16 ticks.",
+      "difference": "none",
+      "note": "Identical formula and sharing."
+    },
+    {
+      "decision": "Clock-frequency independence",
+      "ma_choice": "No clock-frequency parameter in RTL; only the runtime baud_div input.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "Runtime divider input of parameterized width; no clock-frequency constant.",
+      "difference": "none",
+      "note": "Spec forbids hard-coding the clock but does not exclude a CLK_FREQ reset default; both chose divider-only."
+    },
+    {
+      "decision": "Divider width",
+      "ma_choice": "Fixed 16-bit baud_div (about 95 baud minimum at 100 MHz).",
+      "spec_settles_it": false,
+      "in_plan": "differs",
+      "plan_choice": "DIV_WIDTH parameter, sized to cover 9600 baud at 100 MHz.",
+      "difference": "equivalent",
+      "note": "Parameterizing the width is a minor variation. The structure is the same."
+    },
+    {
+      "decision": "Divider edge handling (zero value, runtime change)",
+      "ma_choice": "0 is treated as 1. A >= comparison tolerates a runtime decrease. baud_div is not latched, and firmware must change it only while !tx_busy && !rx_busy.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "The 0/1 case is either clamped or held idle (left open). A mid-frame change takes effect at the next tick reload, with no latching.",
+      "difference": "none",
+      "note": "The plan has the same unlatched behaviour but leaves the zero-divider policy undecided and has no busy-gated firmware rule."
+    },
+    {
+      "decision": "RX glitch filtering method",
+      "ma_choice": "2-FF synchronizer reset to 1, then a 3-sample majority vote at mid-bit (ticks 6-8). No continuous debounce filter.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "2-FF synchronizer, then a 3-sample majority vote at ticks 7/8/9 for every bit.",
+      "difference": "none",
+      "note": "The sample-tick offset differs by one and is not architectural."
+    },
+    {
+      "decision": "False-start rejection",
+      "ma_choice": "A low on idle enters START. The mid-start majority is re-checked, and if it reads 1 the receiver returns to IDLE with nothing pushed.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "A falling edge arms the receiver, which aborts to IDLE if the voted mid-start sample is high.",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Per-byte error reporting",
+      "ma_choice": "Errored bytes are still delivered. The RX FIFO is 10 bits wide ({parity_err, frame_err, data}) and the flags come out as RX stream sideband.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "Same 10-bit FIFO entries, with sideband flags on the RX stream.",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "RX overflow policy and signalling",
+      "ma_choice": "Drop the incoming byte and preserve FIFO contents. Sticky rx_overrun is cleared by a status_clr pulse, and clear wins over a simultaneous set.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "Drop the incoming byte. Sticky rx_overflow is cleared by an rx_overflow_clr input, plus an extra one-cycle pulse output. The clear/set collision is to be defined.",
+      "difference": "none",
+      "note": "The plan adds a pulse output, which is a minor interface addition."
+    },
+    {
+      "decision": "Break / stuck-low handling",
+      "ma_choice": "BREAK state after a bad stop bit waits for the line to go high. A break gives one 0x00 entry with frame_err and no break flag.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "Wait for rxd high before re-arming. A break shows up as a single 0x00 with frame_err and no break flag.",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "RX push timing / stop-bit handling",
+      "ma_choice": "Push at the mid-stop-bit sample and leave STOP early, so start detection re-arms early to absorb baud mismatch.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "The stop bit is sampled at mid-bit and the byte plus flags are pushed then, without waiting for the full stop bit.",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Parity configuration handling",
+      "ma_choice": "Shared parity_en/parity_odd inputs, latched per frame by each FSM.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "Shared parity_en/parity_odd, latched at frame start by each FSM.",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "TX path behaviour",
+      "ma_choice": "FIFO-fed FSM with a registered txd and back-to-back frames (STOP goes directly to START with no idle gap).",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "Registered txd; the next start bit follows the stop bit immediately when the FIFO is non-empty.",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Status outputs to the wrapper",
+      "ma_choice": "tx_level/rx_level plus tx_busy/rx_busy outputs. Busy is used to gate safe baud changes.",
+      "spec_settles_it": false,
+      "in_plan": "differs",
+      "plan_choice": "Full/empty/count FIFO status outputs; no busy indicators.",
+      "difference": "equivalent",
+      "note": "Levels match. The missing busy signals weaken the safe-reconfiguration story, but the core structure is unaffected."
+    },
+    {
+      "decision": "FIFO structure and depth",
+      "ma_choice": "Synchronous FWFT FIFOs, FIFO_DEPTH parameter defaulting to 8 (power of 2), used for both directions.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "FIFO_DEPTH parameter defaulting to 8 for both FIFOs; RX data held stable while stalled.",
+      "difference": "none",
+      "note": "FWFT is not stated explicitly but is implied by the stream semantics."
+    },
+    {
+      "decision": "Clocking and reset",
+      "ma_choice": "Single clock domain with rxd as the only asynchronous input. Active-low reset, async assert / sync deassert. txd and the synchronizer flops reset high.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "Single domain with rxd as the only CDC point. Active-low async-assert/sync-deassert reset; txd resets high.",
+      "difference": "none",
+      "note": ""
+    }
+  ],
+  "needless_questions": [],
+  "summary": "The plan matches the reference closely on nearly every architecture decision. These include the shared 16x tick with a divider in cycles per tick, the 2-FF sync plus 3-sample mid-bit majority, start-bit re-verification, 10-bit RX FIFO entries with per-byte error sideband, drop-new with a sticky overflow, BREAK wait-for-high, early push at mid-stop, per-frame parity latching, back-to-back TX and the reset style. The only differences are minor and equivalent: a parameterized divider width, no tx_busy/rx_busy status (and so no busy-gated baud-change rule), an extra overflow pulse output, and the zero-divider policy left open. No questions were asked."
+}

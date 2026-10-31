@@ -1,0 +1,145 @@
+{
+  "score": {
+    "key_decisions": 14,
+    "matches": 11,
+    "differs": 3,
+    "missing": 0,
+    "spec_silent": 12,
+    "spec_silent_differs": 3,
+    "material_differs": 2,
+    "needless_questions": 0,
+    "coverage": 1.0,
+    "agreement": 0.786,
+    "sound": 0.857
+  },
+  "key_decisions": [
+    {
+      "decision": "Fetch organisation with synchronous I-SRAM",
+      "ma_choice": "imem_addr = pc_next combinationally. pc_f is registered, so the SRAM output aligns with pc_f in IF. imem_en=0 on stall or halt, relying on the SRAM holding its output. Redirect drives ex_target.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "Identical scheme, settled through Q1 (D3).",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Memory interface handshake",
+      "ma_choice": "No ready or wait signals. Read data is valid exactly 1 cycle after an enabled request. Wait states are deferred to the future.",
+      "spec_settles_it": true,
+      "in_plan": "matches",
+      "plan_choice": "No ready or stall inputs; fixed 1-cycle latency (D2).",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Forwarding network and load-use handling",
+      "ma_choice": "EX/MEM and MEM/WB forward into EX, with the youngest producer winning. The forwarded values also feed the branch compare and store data. Load-use is the only stall, 1 cycle, followed by a WB forward.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "Same sources, priority and 1-cycle load-use stall (D5).",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Conservative store-data load-use stall (no WB\u2192MEM forward)",
+      "ma_choice": "A store whose rs2 depends on the immediately preceding load stalls 1 cycle. WB\u2192MEM forwarding is listed as a future improvement.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "D5 rejects the extra MEM-stage store-data forwarding. The load-use check covers any used rs1/rs2, so stores stall too.",
+      "difference": "none",
+      "note": "The plan reaches the same choice implicitly but does not flag the R3 tension ('forwarding wherever possible')."
+    },
+    {
+      "decision": "Control-transfer resolution",
+      "ma_choice": "All branches, JAL and JALR resolve in EX with static not-taken prediction. A redirect flushes IF/ID and ID/EX, a 2-cycle penalty.",
+      "spec_settles_it": true,
+      "in_plan": "matches",
+      "plan_choice": "Same (D6).",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Data-memory access stage and load alignment location",
+      "ma_choice": "dmem is driven from the EX/MEM register in MEM. Data returns in WB, where it is lane-extracted and sign-extended. wb_data is the MEM/WB forward source.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "Same (D7, defaulted).",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Register file implementation and WB\u2192ID hazard",
+      "ma_choice": "31\u00d732 flop register file with 2 async read ports and a write-through bypass on rd match.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "Same (D4).",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Bubble representation",
+      "ma_choice": "A per-stage valid bit. All side effects (RF write, dmem, redirect, trace) are ANDed with valid, and datapath fields are not reset.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "Same (D9).",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Illegal instruction / ECALL / EBREAK handling (R11)",
+      "ma_choice": "Trap in EX and halt. halted_q and halt_pc are registered. Younger instructions are flushed, the trapping one does not retire, older ones drain. Only rst exits.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "Same, settled through Q2 (D12).",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "FENCE.I treatment",
+      "ma_choice": "Executes as a NOP; self-modifying code is left to the system level.",
+      "spec_settles_it": false,
+      "in_plan": "differs",
+      "plan_choice": "FENCE.I is decoded as illegal and halts the core (D1).",
+      "difference": "material",
+      "note": "This is visible behaviour: code using FENCE.I halts instead of continuing. The plan's choice is defensible because FENCE.I is absent from R1, but it changes the decode table and the trap coverage."
+    },
+    {
+      "decision": "Retire-trace content",
+      "ma_choice": "WB-sourced trace with an explicit rd_we, plus store mem_we/addr/wdata/wstrb fields so stores are checked in lock-step.",
+      "spec_settles_it": false,
+      "in_plan": "differs",
+      "plan_choice": "Only the R10 fields. Non-writing instructions report rd=0/data=0, and stores are traced by PC and instruction only. Store visibility is left as an open question.",
+      "difference": "material",
+      "note": "The top-level interface differs, and the plan's trace cannot catch store-data or store-address bugs in lock-step."
+    },
+    {
+      "decision": "Misaligned access and target handling",
+      "ma_choice": "Not detected in hardware; offset bits are ignored. Simulation assertions flag misaligned accesses and targets.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "No detection, implementation-defined result, no halt path (D8).",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Reset scope and first fetch",
+      "ma_choice": "pc_next=RESET_PC with imem_en=1 during reset. Valid bits and halted are cleared. The register file is not reset by default, with an optional RF_RESET parameter for ISS lock-step.",
+      "spec_settles_it": false,
+      "in_plan": "differs",
+      "plan_choice": "Same reset sequence. The register file is never reset and there is no RF_RESET option.",
+      "difference": "equivalent",
+      "note": "The only gap is the missing optional parameter that eases ISS lock-step; the core structure is unchanged."
+    },
+    {
+      "decision": "Hazard/event priority and exclusivity",
+      "ma_choice": "Priority is rst > trap > redirect > load_use. Redirect and load-use are mutually exclusive, and so are trap and redirect; both are asserted.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "Priority reset > trap/halt > redirect > load-use, with trap and redirect noted as mutually exclusive.",
+      "difference": "none",
+      "note": ""
+    }
+  ],
+  "needless_questions": [],
+  "summary": "The plan closely tracks the reference architecture: combinational pc_next fetch, EX/MEM and MEM/WB forwarding, a 1-cycle load-use stall, EX branch resolution with a 2-bubble flush, MEM-stage dmem with WB extension, a flop register file with bypass, valid-bit bubbles and halt-on-trap. Both questions were warranted: fetch alignment with a synchronous SRAM and the TBD R11. There are two material divergences. First, FENCE.I is treated as illegal and halts, where the MA treats it as a NOP. Second, the retire trace omits rd_we and the store address/data/strobe fields, which weakens ISS lock-step checking of stores. A minor difference is the missing optional RF_RESET parameter."
+}

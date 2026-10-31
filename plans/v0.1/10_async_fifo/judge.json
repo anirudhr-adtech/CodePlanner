@@ -1,0 +1,147 @@
+{
+  "score": {
+    "key_decisions": 14,
+    "matches": 11,
+    "differs": 2,
+    "missing": 1,
+    "spec_silent": 13,
+    "spec_silent_differs": 2,
+    "material_differs": 1,
+    "needless_questions": 1,
+    "coverage": 0.929,
+    "agreement": 0.786,
+    "sound": 0.857
+  },
+  "key_decisions": [
+    {
+      "decision": "Pointer scheme and DEPTH restriction",
+      "ma_choice": "Binary plus registered Gray pointers of ADDR_W+1 bits; DEPTH restricted to powers of 2; only the Gray copy crosses domains",
+      "spec_settles_it": true,
+      "in_plan": "matches",
+      "plan_choice": "Power-of-2 DEPTH with an elaboration assertion; ADDR_W+1-bit pointers; Gray value registered before the crossing",
+      "difference": "none",
+      "note": "The spec says 'Gray pointers' and 'power of 2 OK', which effectively fixes this."
+    },
+    {
+      "decision": "Flag generation style",
+      "ma_choice": "All flags registered, computed from the next local pointer against the synchronized remote pointer",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "Registered flags from the next pointer vs the synchronized pointer (Cummings style)",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Full/empty comparison",
+      "ma_choice": "Full = next wgray equals synced rgray with the two MSBs inverted; empty = Gray equality",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "Gray compare with the top two bits inverted for full; equality for empty",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Almost-flag semantics and computation",
+      "ma_choice": "Occupancy levels (level >= AF_LEVEL, level <= AE_LEVEL) from gray2bin of the synced pointer, using the next local pointer",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "Occupancy-level thresholds; Gray-to-binary of the synced pointer for the fill level",
+      "difference": "none",
+      "note": "Neither the MA nor the plan specified default threshold values. The MA uses DEPTH-4 and 4; the plan leaves this open."
+    },
+    {
+      "decision": "One-sided reset policy",
+      "ma_choice": "Coupled async clear wrst_n & rrst_n into both domains; either reset flushes the FIFO; each side releases synchronously after both deassert",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "Coupled flush with the combined async clear and per-domain release after both resets deassert (from the Q1 answer)",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Reset synchronization structure",
+      "ma_choice": "Per-domain rst_sync (async assert, sync deassert); the write side stays in reset if wclk is stopped at release",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "An internal async-assert/sync-deassert reset synchronizer per domain; the stopped-wclk case is covered explicitly",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Storage implementation",
+      "ma_choice": "Flop/LUT-RAM array, synchronous write on wclk, asynchronous read captured into rd_data_q on rclk, no reset; RAM macro for large DEPTH",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "Flop array with combinational read into a registered rd_data, wrapped so a macro can be swapped in",
+      "difference": "none",
+      "note": "The plan leaves memory reset as a question to answer later. The MA explicitly does not reset the array."
+    },
+    {
+      "decision": "Synchronizer cell",
+      "ma_choice": "Dedicated sync_ff module parameterized by SYNC_STAGES (default 2), ASYNC_REG attributes",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "Dedicated parameterized sync module (SYNC_STAGES=2) with ASYNC_REG/dont_touch attributes",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Overflow/underflow handling",
+      "ma_choice": "Ignore wr_en when full and rd_en when empty; no error flags",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "Ignore writes and reads at the boundaries; SVA only; no extra error ports",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Read-side interface extras",
+      "ma_choice": "Adds a convenience rd_valid output that pulses one cycle after an accepted read",
+      "spec_settles_it": false,
+      "in_plan": "differs",
+      "plan_choice": "Keeps strictly to the spec port list; no rd_valid",
+      "difference": "material",
+      "note": "This adds an output port the plan does not have, so the interface changes."
+    },
+    {
+      "decision": "SDC constraint style",
+      "ma_choice": "set_clock_groups -asynchronous, plus set_max_delay -datapath_only 5 ns and set_bus_skew on the Gray buses and the memory read path",
+      "spec_settles_it": false,
+      "in_plan": "differs",
+      "plan_choice": "No asynchronous clock group or blanket false path; set_max_delay -datapath_only 5 ns plus a bus-skew limit on the Gray buses and the mem-to-rd_data path",
+      "difference": "equivalent",
+      "note": "The RTL is unchanged. The plan avoids the clock-group/max_delay precedence pitfall, which arguably makes it the cleaner choice."
+    },
+    {
+      "decision": "Memory-to-rd_data crossing qualification",
+      "ma_choice": "Treated as pointer-qualified; SpyGlass FIFO declaration waives Ac_unsync02; path bounded to one rclk period",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "Memory crossing recognized as FIFO-qualified in SpyGlass; max_delay 5 ns on the mem-to-rd_data path",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Behaviour when wclk stops with buffered data",
+      "ma_choice": "The reader keeps sampling the stable wgray and drains every accepted word",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "All words written before the stop remain readable; wr_full may be stale but is pessimistic",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Flag reset values",
+      "ma_choice": "rd_empty=1, rd_almost_empty=1, wr_full=0, wr_almost_full=0 out of reset",
+      "spec_settles_it": false,
+      "in_plan": "missing",
+      "plan_choice": "",
+      "difference": "none",
+      "note": "The plan only says reset values must be 'chosen so no flag is optimistic' and leaves wr_full's value unresolved. That wording could even imply wr_full=1 during reset."
+    }
+  ],
+  "needless_questions": [
+    "Q2"
+  ],
+  "summary": "The plan closely tracks the reference MA. Its Gray pointer and flag scheme, registered next-pointer flags, occupancy-level almost flags, coupled async-clear reset with per-domain synchronizers, flop-array storage and sync module all match, as does its stopped-clock and overflow handling. It differs in two places. It does not add the MA's convenience rd_valid port, which is an interface difference. Its SDC avoids set_clock_groups -asynchronous in favour of max_delay plus bus_skew only, which is equivalent and arguably cleaner. Flag reset values are left unresolved. Q1 was a legitimate question. Q2 (target format) was answered with the default and did not affect the architecture."
+}

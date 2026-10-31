@@ -1,0 +1,154 @@
+{
+  "score": {
+    "key_decisions": 15,
+    "matches": 13,
+    "differs": 2,
+    "missing": 0,
+    "spec_silent": 13,
+    "spec_silent_differs": 2,
+    "material_differs": 0,
+    "needless_questions": 0,
+    "coverage": 1.0,
+    "agreement": 0.867,
+    "sound": 1.0
+  },
+  "key_decisions": [
+    {
+      "decision": "MODE fixed at elaboration (parameter) vs runtime input",
+      "ma_choice": "Elaboration-time parameter; only the selected boundary policy is built",
+      "spec_settles_it": true,
+      "in_plan": "matches",
+      "plan_choice": "Compile-time parameter; only the selected overflow logic is generated (D9)",
+      "difference": "none",
+      "note": "The spec says 'parameter MODE'."
+    },
+    {
+      "decision": "MODE representation and default",
+      "ma_choice": "Integer MODE: 0=WRAP, 1=SATURATE, default WRAP",
+      "spec_settles_it": false,
+      "in_plan": "differs",
+      "plan_choice": "String parameter \"WRAP\"/\"SATURATE\", default \"WRAP\"",
+      "difference": "equivalent",
+      "note": "Both default to WRAP. The encoding difference does not change the architecture."
+    },
+    {
+      "decision": "Illegal MODE handling",
+      "ma_choice": "Elaboration-time generate + $error check",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "Illegal MODE handled by an elaboration-time error, and the handling is documented",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Definition of MAX",
+      "ma_choice": "MAX = 2^N-1 (all ones), derived localparam; no modulus parameter",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "max = {N{1'b1}}, no separate modulus (D7)",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Next-state priority including reset",
+      "ma_choice": "rst > load > en-count > hold",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "rst > load > en-count > hold (S4/D5)",
+      "difference": "none",
+      "note": "The spec gives load over counting. Reset priority is a convention."
+    },
+    {
+      "decision": "Load independent of en",
+      "ma_choice": "load acts whenever load=1, regardless of en",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "load acts regardless of en (D4)",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Reset value",
+      "ma_choice": "count resets to 0",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "count resets to 0 (D5)",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Arithmetic structure",
+      "ma_choice": "One shared N-bit adder: count + (up ? 1 : all-ones)",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "Single shared \u00b11 adder (D8)",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "WRAP implementation",
+      "ma_choice": "Natural modulo-2^N overflow of the adder; no extra compare",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "WRAP uses natural overflow; no compare for the count update",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "SATURATE implementation and sharing with tc",
+      "ma_choice": "Suppress the update when en && at_bound (up ? at_max : at_zero); tc = at_bound, so the same signal is reused",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "SATURATE suppresses the update using the boundary compare, which is the same signal as tc",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "tc timing: combinational decode vs registered",
+      "ma_choice": "Combinational decode of count_q and live up; TC_REG is only a future option",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "Combinational decode; TC_REG is a future extension (D2, per Q1)",
+      "difference": "none",
+      "note": "The spec's 'registered outputs' is ambiguous for tc, so asking was justified."
+    },
+    {
+      "decision": "tc qualification by en/load",
+      "ma_choice": "tc ignores en and load; it is a pure boundary indicator",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "tc depends only on count and up (D3)",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Pipeline depth and structure",
+      "ma_choice": "Single cycle, single register, flat with no submodules",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "Single cycle, no pipelining (D11)",
+      "difference": "none",
+      "note": "The plan does not mention submodule partitioning, but the structure is the same."
+    },
+    {
+      "decision": "Clock/reset style",
+      "ma_choice": "Single rising-edge clk, synchronous active-high rst, en as a datapath enable, no CDC",
+      "spec_settles_it": true,
+      "in_plan": "matches",
+      "plan_choice": "Single rising-edge clk, sync active-high rst, no clock gating (D10)",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Legal range of N",
+      "ma_choice": "N in 1..64; N=1 supported",
+      "spec_settles_it": false,
+      "in_plan": "differs",
+      "plan_choice": "Minimum legal N stated (N=1 covered); no upper bound defined",
+      "difference": "equivalent",
+      "note": "Only the documentation of the bounds differs."
+    }
+  ],
+  "needless_questions": [],
+  "summary": "The plan matches the reference MA on essentially every architecture-level decision: compile-time MODE, MAX = all-ones, rst>load>en>hold priority, load independent of en, a shared \u00b11 adder with natural wrap, a SATURATE hold that reuses the tc boundary compare, tc as an unqualified combinational decode, and a single-cycle synchronous design. The differences are minor and equivalent: MODE is encoded as a string rather than an integer (both default to WRAP), and no explicit upper bound on N is given. The single question (Q1, registered vs decoded tc) was justified, because the spec's 'registered outputs' is ambiguous for tc."
+}

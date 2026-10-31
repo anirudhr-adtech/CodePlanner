@@ -1,0 +1,163 @@
+{
+  "score": {
+    "key_decisions": 16,
+    "matches": 14,
+    "differs": 2,
+    "missing": 0,
+    "spec_silent": 16,
+    "spec_silent_differs": 2,
+    "material_differs": 2,
+    "needless_questions": 0,
+    "coverage": 1.0,
+    "agreement": 0.875,
+    "sound": 0.875
+  },
+  "key_decisions": [
+    {
+      "decision": "CPU register interface and register set",
+      "ma_choice": "Plain 32-bit register port (addr[4:0], wdata, we, re, registered rdata) with an OpenCores-style PRESC/CTRL/TXR/RXR/CMD/STATUS map",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "Same plain register port and OpenCores-style map, settled by the Q1 answer",
+      "difference": "none",
+      "note": "The spec said TBD; the plan asked and got the answer."
+    },
+    {
+      "decision": "Command model",
+      "ma_choice": "Byte-level CMD with STA/STO/RD/WR/ACK/IACK, any combination per byte; STA while owned gives Sr",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "OpenCores-style byte-level CMD with STA/STO/RD/WR/ACK/IACK; STA on a held bus gives Sr",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "7-bit address handling",
+      "ma_choice": "No address hardware; firmware writes {addr,R/W} to TXR with STA|WR",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "Same; no dedicated address register",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Data buffering",
+      "ma_choice": "Single TXR and RXR, no FIFOs",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "Single TXR/RXR, no FIFOs",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Interrupt and status scheme",
+      "ma_choice": "irq = IEN & IF; IF set on done/AL and cleared by CMD.IACK; STATUS holds IF/TIP/AL/BUSY/RXACK",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "Same OpenCores IF/IEN/IACK scheme with the same STATUS bits",
+      "difference": "none",
+      "note": "The plan would also fold a timeout cause into IF."
+    },
+    {
+      "decision": "Two-layer controller architecture",
+      "ma_choice": "Byte controller FSM sequencing bit-controller primitives (START/STOP/DATA)",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "Bit engine (S5) plus byte controller (S6) with a handshake",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "SCL timing generation",
+      "ma_choice": "Single 16-bit PRESC giving quarter-period q = PRESC+1 clocks; fixed 50% duty, 4q per bit",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "Single 16-bit PRESC in OpenCores style (~5*(PRESC+1) per period) with fixed sub-phases",
+      "difference": "none",
+      "note": "The phase granularity differs slightly (5 vs 4 phases), but both use one runtime prescaler with a fixed duty cycle."
+    },
+    {
+      "decision": "Fast-mode frequency vs tLOW compliance",
+      "ma_choice": "Run Fast mode at 375 kHz (PRESC=31) because a 50% duty cycle at 400 kHz violates tLOW >= 1.3 us",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "Plan requires checking tLOW against the fixed duty cycle and stating a reduced Fm SCL if 400 kHz is not compliant",
+      "difference": "none",
+      "note": "The plan anticipates the issue without fixing the number."
+    },
+    {
+      "decision": "Input conditioning / glitch filter",
+      "ma_choice": "2-FF sync plus stability filter with a runtime-programmable length in CTRL.FILT (0-7, default 3, rejects >= 50 ns)",
+      "spec_settles_it": false,
+      "in_plan": "differs",
+      "plan_choice": "2-FF sync plus digital filter whose length is a synthesis parameter only, with no register field",
+      "difference": "material",
+      "note": "This changes the CTRL register contents and removes firmware tunability."
+    },
+    {
+      "decision": "Pad interface",
+      "ma_choice": "Separate scl_i/scl_oe and sda_i/sda_oe (oe=1 drives low); never drive high; pad outside the IP",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "Same separate input / drive-low-enable signals",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Clock domain",
+      "ma_choice": "Single peripheral clock domain; only SCL/SDA synchronized",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "Single peripheral clock domain",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Clock stretching mechanism",
+      "ma_choice": "SCL-release phases wait for filtered SCL high before counting; also gives multi-master clock sync",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "Freeze the phase counter until filtered SCL reads high on every rising edge",
+      "difference": "none",
+      "note": "The MA also ends the high phase early if another master pulls SCL low; the plan only mentions clock sync implicitly."
+    },
+    {
+      "decision": "Bus-busy and STA-while-busy behaviour",
+      "ma_choice": "bus_busy tracked from START/STOP detection; STA waits in idle until STOP when another master owns the bus",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "BUSY set by START and cleared by STOP; STA waits while busy",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Arbitration loss handling",
+      "ma_choice": "Detect SDA mismatch in DATA/START/STOP and a foreign STOP; release lines immediately, set AL and IF, abort, no retry",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "Detect SDA mismatch or an unexpected START/STOP; release both lines, abort, set AL and IF, no auto-retry",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Stuck-bus / stretch timeout",
+      "ma_choice": "No timeouts; recommended for a later revision",
+      "spec_settles_it": false,
+      "in_plan": "differs",
+      "plan_choice": "Add a programmable timeout register at a spare offset (0 = disabled) that aborts and sets a STATUS timeout bit plus IF",
+      "difference": "material",
+      "note": "Adds a register and a STATUS bit, so the interface and error behaviour change."
+    },
+    {
+      "decision": "NACK handling",
+      "ma_choice": "Slave NACK only reported in RXACK; no automatic abort or STOP",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "NACK does not abort; firmware decides on STOP",
+      "difference": "none",
+      "note": ""
+    }
+  ],
+  "needless_questions": [],
+  "summary": "The plan lines up closely with the MA. It has the same OpenCores-style byte-level programming model, plain register port, single TXR/RXR, IF/IEN/IACK interrupt and two-layer bit/byte engine. It also agrees on single-PRESC timing, stretching through SCL readback, STA waiting while the bus is busy, and immediate release on arbitration loss. It even anticipates the Fast-mode tLOW/duty-cycle problem. There are two material differences. The plan makes the glitch filter a synthesis-time parameter, whereas the MA puts a runtime CTRL.FILT field in the register map. The plan also adds a programmable timeout register and STATUS bit that the MA deliberately leaves out. The only question asked (CPU interface) was legitimately open in the spec."
+}

@@ -1,0 +1,16 @@
+[
+  {
+    "id": "Q1",
+    "decision_id": "D9",
+    "question": "If only the sensor side (or only the system side) is reset while the FIFO holds pixels, should the whole FIFO be flushed (both sides reset), or will the system always reset both sides before restarting traffic?",
+    "in_doc": true,
+    "answer": "Flush the whole FIFO. Either reset, asserted alone, asynchronously resets both pointer sets (coupled async clear = wrst_n & rrst_n), and any in-flight pixels are discarded. Each side leaves reset synchronously to its own clock, and only after both resets are de-asserted. Do not assume the system will always reset both sides together."
+  },
+  {
+    "id": "Q2",
+    "decision_id": "D11",
+    "question": "What is the implementation target and constraint format (Vivado XDC, Quartus SDC, or ASIC SDC for Synopsys tools)?",
+    "in_doc": false,
+    "answer": "Use the default: Use SDC-style constraints. Define both clocks. On each Gray pointer bus and on the memory-to-rd_data crossing, apply a set_max_delay -datapath_only bounded by the smaller clock period (5 ns) plus a bus-skew limit. Do not use a blanket false path, since that would let Gray bits skew more than one cycle."
+  }
+]

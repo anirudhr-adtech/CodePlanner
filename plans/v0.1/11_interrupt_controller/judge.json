@@ -1,0 +1,154 @@
+{
+  "score": {
+    "key_decisions": 15,
+    "matches": 12,
+    "differs": 3,
+    "missing": 0,
+    "spec_silent": 15,
+    "spec_silent_differs": 3,
+    "material_differs": 1,
+    "needless_questions": 0,
+    "coverage": 1.0,
+    "agreement": 0.8,
+    "sound": 0.933
+  },
+  "key_decisions": [
+    {
+      "decision": "Input synchronization for asynchronous GPIO sources",
+      "ma_choice": "A per-source SYNC_MASK parameter, defaulting to all 1s, puts a 2-FF synchronizer on selected bits. Synchronous sources can bypass it and save 2 cycles.",
+      "spec_settles_it": false,
+      "in_plan": "differs",
+      "plan_choice": "A fixed 2-FF synchronizer on all 32 sources. A per-source mask is mentioned only as a possible change if D2 is revisited.",
+      "difference": "equivalent",
+      "note": "The default behaviour is identical. The plan just lacks the bypass parameter, which affects only latency for synchronous sources."
+    },
+    {
+      "decision": "Gateway / pending structure",
+      "ma_choice": "Rising-edge detect into a latched epend_q for edge sources, and the live synchronized level for level sources. A new edge wins over a claim or software clear in the same cycle.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "Sync flops, a delayed copy for edge detect and a pending flop, muxed by trigger type. Level pending is the unlatched synchronized line, and set wins.",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Edge capture while source disabled",
+      "ma_choice": "Pending is captured independently of enable. Enable gates only eligibility.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "D3: pending captures edges regardless of enable.",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Priority register packing",
+      "ma_choice": "4-bit nibbles (3 bits used), 8 sources per word, 4 words.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "D4: the same nibble packing.",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Software clear of stuck edge pending",
+      "ma_choice": "PENDING is read-only. A separate write-1-to-clear PEND_CLR register clears edge latches.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "D6: a separate W1C PENDING_CLR.",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "CLAIM return format / empty claim",
+      "ma_choice": "[31] VALID, [4:0] ID with IDs 0..31. An empty claim returns 0 with no side effect.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "D5, decided via Q2: identical.",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Arbiter structure",
+      "ma_choice": "A 5-level combinational 32-to-1 max-finder (lowest ID wins ties) registered once into best_{vld,id,prio}_q. Threshold and nesting are applied after the register.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "D7: a 5-level compare tree with a registered winner {valid, id, prio}. Threshold and running level are folded into eligibility before the tree.",
+      "difference": "none",
+      "note": "Where the threshold is applied differs slightly. The winner selection is equivalent."
+    },
+    {
+      "decision": "Threshold / nesting combination",
+      "ma_choice": "eff_thr = max(THRESHOLD, highest in-service level); a source is claimable only if prio > eff_thr.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "D8: eligible iff prio > THRESHOLD and prio > running priority.",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "irq generation and deassert timing",
+      "ma_choice": "irq = best_vld_q && best_prio_q > eff_thr. This is combinational from registered state, so irq drops the cycle after a claim edge because isr_v updates immediately.",
+      "spec_settles_it": false,
+      "in_plan": "differs",
+      "plan_choice": "irq is driven directly from the registered winner-valid flop, with eligibility computed before the register. irq can stay high 1-2 cycles after a claim, and firmware must tolerate a spurious CLAIM.",
+      "difference": "equivalent",
+      "note": "The plan's output is glitch-free but adds a cycle of stale irq after claim/complete. Both are defensible. The plan explicitly documents the spurious-claim consequence."
+    },
+    {
+      "decision": "Claim correctness against a stale tree result",
+      "ma_choice": "The claim re-checks live state in the same cycle: elig[best_id_q] and the live prio_q[best_id_q] > eff_thr. The in-service level is taken from the live prio_q, guaranteeing a free, strictly higher level and a valid LIFO.",
+      "spec_settles_it": false,
+      "in_plan": "differs",
+      "plan_choice": "No live re-check. The plan only invalidates the winner register in the cycle after a claim to stop double claims. The claim commits using the registered winner's prio.",
+      "difference": "material",
+      "note": "Without a re-check, the plan can hand out a source that was disabled, dropped its level or was reprogrammed during the stale cycle. It can also record a level from stale prio, breaking the guarantee that the claimed level is free and above the running level. S9 lists the 'level dropped before claim' case but gives no mechanism."
+    },
+    {
+      "decision": "In-service tracking and COMPLETE matching",
+      "ma_choice": "7 \u00d7 {valid, stored 5-bit ID}, one slot per level. COMPLETE clears the highest level whose stored ID matches. A non-matching COMPLETE is ignored, and out-of-order completes are allowed.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "D9/D10 from Q1: isr_v[7:1] plus isr_id per level, with the highest-match clear and unmatched writes ignored.",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "In-service debug visibility",
+      "ma_choice": "An INSERVICE register with [7:1] level bits and [10:8] effective threshold.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "A 7-bit IN_SERVICE register plus optional running priority and per-level IDs.",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Source-to-irq latency budget",
+      "ma_choice": "Edge+sync takes 4 cycles and level+sync takes 3. Without sync it is 2 and 1.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "About 4 cycles for an edge (2 sync, 1 pending, 1 winner). Level is implicitly 3.",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Reset style and reset values",
+      "ma_choice": "Active-low rst_n with async assert and sync deassert. All config, pending and in-service state reset to 0, so irq is low.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "D12: the same.",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Trigger-type change at runtime",
+      "ma_choice": "Switching from edge to level clears the epend_q bit, and the live level is used.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "S3 specifies trigger-change behaviour, including clearing stale edge pending.",
+      "difference": "none",
+      "note": ""
+    }
+  ],
+  "needless_questions": [],
+  "summary": "The plan closely tracks the reference on nearly every architectural choice: gateway structure, enable-independent pending capture, nibble packing, PEND_CLR, CLAIM {VALID,ID}, the 5-level registered tree, max(threshold, running level) eligibility, the per-level {v,id} in-service stack with highest-match COMPLETE, reset and latency. There are two equivalent differences. The plan synchronizes all sources without a SYNC_MASK bypass, and it registers irq straight from winner-valid, which adds a cycle of stale irq after claim. The one material gap is that the plan lacks a same-cycle live re-check of eligibility at claim time. It relies only on invalidating the winner after a claim and commits the claim level from the stale registered prio. That can hand out ineligible sources and break the free/strictly-higher-level invariant that the MA guarantees. Both questions were legitimate, since the spec is silent on out-of-order COMPLETE matching and on the empty-CLAIM encoding."
+}

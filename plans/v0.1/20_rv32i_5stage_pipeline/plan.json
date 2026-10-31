@@ -1,0 +1,641 @@
+{
+  "steps": [
+    {
+      "id": "S1",
+      "title": "Scope the Fivestage RV32I core: R1 instruction list, exclusions, and trap-to-halt treatment of ECALL/EBREAK/FENCE.I",
+      "goal": "Write the Overview. Fivestage is a 5-stage in-order RV32I core with Harvard TCM ports, a retire-trace port and a halt-on-trap mechanism. State which RV32I v2.1 encodings are implemented and which are excluded (CSRs, interrupts, privilege). State that ECALL, EBREAK, illegal encodings and any encoding outside the R1 list (such as FENCE.I) trap in EX and halt the core. No trap vectoring exists.",
+      "spec_evidence": [
+        {
+          "section": "P1",
+          "quote": "RV32I core"
+        },
+        {
+          "section": "P2",
+          "quote": "Implement the RISC-V RV32I base integer ISA (unprivileged spec v2.1)"
+        },
+        {
+          "section": "P2",
+          "quote": "FENCE may be a no-op."
+        },
+        {
+          "section": "P2",
+          "quote": "No CSRs, interrupts or privilege modes in this version."
+        },
+        {
+          "section": "P2",
+          "quote": "Illegal instruction handling: TBD."
+        }
+      ],
+      "decisions": [
+        {
+          "id": "D1",
+          "topic": "Handling of ECALL, EBREAK and FENCE.I (encodings not listed in R1)",
+          "options": [
+            "Execute as architectural NOPs that retire normally",
+            "Treat as traps that halt the core (same path as illegal instructions)",
+            "EBREAK halts; ECALL as NOP"
+          ],
+          "status": "decided",
+          "choice": "ECALL and EBREAK trap in EX and halt the core, as the user's answer to Q2 states. FENCE.I is not in the R1 list, so it is decoded as an illegal encoding and takes the same halt path. FENCE (all fm/pred/succ variants) executes as a NOP and retires.",
+          "rationale": "The user answer to Q2 explicitly puts ECALL and EBREAK on the illegal/halt path. FENCE.I belongs to Zifencei, is absent from R1, and therefore falls under 'illegal encodings'.",
+          "impact": "low",
+          "confidence": "high",
+          "question": ""
+        }
+      ],
+      "depends_on": [],
+      "output_section": [
+        "Overview",
+        "Assumptions & Open Questions"
+      ],
+      "done_when": [
+        "The Overview lists every R1 mnemonic grouped by format (R/I/S/B/U/J).",
+        "The Overview states that FENCE is a retiring NOP, and that ECALL, EBREAK, FENCE.I and other non-R1 encodings halt the core.",
+        "The R7 exclusions are listed, and it is noted that halt is the only trap response (no vectoring, no CSRs) and that only rst exits it.",
+        "The Assumptions section records that FENCE.I is treated as illegal by inference from the R1 list."
+      ]
+    },
+    {
+      "id": "S2",
+      "title": "Define the top-level ports: imem with enable, dmem with byte strobes, retire trace, halted/halt_pc, and the RESET_PC parameter",
+      "goal": "Specify every top-level port with its direction, width and timing:\n- the instruction port: imem_addr = pc_next (combinational) and imem_en;\n- the data port: address, enable, write enable, 4-bit byte strobe, write data, read data;\n- the retire-trace bundle;\n- the halted and halt_pc status outputs from the R11 answer;\n- clock and reset.\nAlso specify the build-time parameters.",
+      "spec_evidence": [
+        {
+          "section": "P2",
+          "quote": "Harvard memory: separate instruction and data ports."
+        },
+        {
+          "section": "P2",
+          "quote": "Both are synchronous memories with a fixed 1-cycle read latency and no wait states (tightly coupled SRAM)."
+        },
+        {
+          "section": "P2",
+          "quote": "The data port supports byte, halfword and word access with byte write strobes."
+        },
+        {
+          "section": "P2",
+          "quote": "Reset vector is configurable at build time."
+        },
+        {
+          "section": "P2",
+          "quote": "Provide a retire-trace port (PC, instruction, rd, write data, valid)"
+        }
+      ],
+      "decisions": [
+        {
+          "id": "D2",
+          "topic": "Memory port handshake",
+          "options": [
+            "No handshake: request/enable only, data always valid exactly 1 cycle later",
+            "Valid/ready handshake for future wait-state support"
+          ],
+          "status": "decided",
+          "choice": "There is no ready or stall input from either memory. The core drives address, enable and strobes, and assumes read data is valid exactly one cycle after an enabled request. The SRAM holds its output while enable is deasserted.",
+          "rationale": "R5 mandates a fixed 1-cycle latency with no wait states (TCM). The Q1 answer relies on the SRAM holding its output when imem_en is low.",
+          "impact": "medium",
+          "confidence": "high",
+          "question": ""
+        }
+      ],
+      "depends_on": [
+        "S1"
+      ],
+      "output_section": [
+        "Interface",
+        "Parameters"
+      ],
+      "done_when": [
+        "The port table gives name, direction, width and description for the imem, dmem, trace, halted, halt_pc, clk and rst ports.",
+        "It is stated that imem_addr is combinational from the next-PC mux and that halted is a registered output.",
+        "Read-data timing relative to the address/enable cycle is stated for both memory ports, including the hold-output assumption when enable is low.",
+        "The byte-strobe meaning and the store-data lane replication rule are given for SB/SH/SW.",
+        "The parameter table includes RESET_PC (the reset vector) with a default value, and any address-width parameter is justified or omitted."
+      ]
+    },
+    {
+      "id": "S3",
+      "title": "IF stage: combinational imem_addr = pc_next, registered pc_f, SRAM output feeding IF/ID",
+      "goal": "Document the fetch organisation agreed in Q1:\n- the next-PC mux selects RESET_PC (during reset), ex_target (on redirect), the held PC (on stall or halt), or pc_f+4;\n- imem_addr = pc_next and pc_f is registered from pc_next, so imem_rdata lines up with pc_f in IF and is captured into IF/ID;\n- imem_en is deasserted on a load-use stall or while halted;\n- on a redirect, the younger IF/ID contents are squashed through their valid bits.",
+      "spec_evidence": [
+        {
+          "section": "P2",
+          "quote": "Classic 5-stage in-order pipeline: IF, ID, EX, MEM, WB."
+        },
+        {
+          "section": "P2",
+          "quote": "Both are synchronous memories with a fixed 1-cycle read latency and no wait states (tightly coupled SRAM)."
+        },
+        {
+          "section": "P2",
+          "quote": "Target CPI close to 1."
+        }
+      ],
+      "decisions": [
+        {
+          "id": "D3",
+          "topic": "Fetch organisation with synchronous imem",
+          "options": [
+            "imem address driven combinationally from the next-PC mux; pc_f registered from pc_next; imem_rdata captured into IF/ID",
+            "imem address from the PC register with an extra fetch stage",
+            "Separate IF/ID flop after the SRAM output"
+          ],
+          "status": "decided",
+          "choice": "The imem address is combinational from the next-PC mux: imem_addr = pc_next.\n- pc_f is registered from pc_next, so imem_rdata in the next cycle aligns with pc_f in IF and is captured into IF/ID.\n- On a load-use stall or while halted, imem_en = 0 so the SRAM holds its output.\n- On a redirect, the address becomes ex_target and the younger IF/ID instruction is squashed by clearing its valid bit.\n- During reset, the address is RESET_PC with imem_en = 1.",
+          "rationale": "Settled by the user's answer to Q1.",
+          "impact": "high",
+          "confidence": "high",
+          "question": ""
+        }
+      ],
+      "depends_on": [
+        "S2"
+      ],
+      "output_section": [
+        "Datapath",
+        "Timing & Pipeline",
+        "Block Diagram"
+      ],
+      "done_when": [
+        "The next-PC mux inputs and priority are specified: reset > redirect > stall/halt hold > pc_f+4.",
+        "imem_en is specified for each condition (reset, normal, load-use stall, redirect, halted), and it is shown that ID keeps the correct instruction across a stall.",
+        "Cycle diagrams cover the sequential fetch, the redirected stream, and the transition into halt.",
+        "The combinational path EX redirect \u2192 pc_next \u2192 imem_addr is called out for timing."
+      ]
+    },
+    {
+      "id": "S4",
+      "title": "ID stage: decoder with illegal detection, immediate generator and 2R1W register file with x0 hard-wired",
+      "goal": "Specify the decode of all R1 opcodes into control fields:\n- ALU op and operand selects;\n- memory size and sign;\n- write-back select;\n- branch/jump type;\n- rd write enable;\n- rs1/rs2-used flags;\n- an illegal/trap flag covering non-R1 encodings, ECALL, EBREAK and FENCE.I.\nAlso specify the I/S/B/U/J immediates and the register file, including how a same-cycle WB write and ID read are resolved.",
+      "spec_evidence": [
+        {
+          "section": "P2",
+          "quote": "x0 is hard-wired to zero."
+        },
+        {
+          "section": "P2",
+          "quote": "Resolve data hazards with forwarding wherever possible; stall only for load-use."
+        },
+        {
+          "section": "P2",
+          "quote": "Illegal instruction handling: TBD."
+        }
+      ],
+      "decisions": [
+        {
+          "id": "D4",
+          "topic": "Register-file WB\u2192ID same-cycle hazard",
+          "options": [
+            "Write-through bypass inside the register file",
+            "Write on negedge",
+            "Third forwarding source from WB into ID/EX"
+          ],
+          "status": "defaulted",
+          "choice": "Use a flop-based 31\u00d732 register file written on posedge, with a combinational write-through bypass on address match (rd\u22600).",
+          "rationale": "This keeps a single clock edge (R8) and needs no extra stall or forwarding source. It is standard practice for 5-stage cores.",
+          "impact": "low",
+          "confidence": "high",
+          "question": "Is a flop-based register file with internal write-through bypass acceptable, or must it map to a specific SRAM/latch macro?"
+        }
+      ],
+      "depends_on": [
+        "S3"
+      ],
+      "output_section": [
+        "Datapath",
+        "Control Logic"
+      ],
+      "done_when": [
+        "A decode table maps each R1 instruction to its control-field values, including the rs1-used and rs2-used flags.",
+        "The illegal-flag conditions are listed: opcode, funct3, funct7, the shift-immediate funct7 checks, ECALL/EBREAK/FENCE.I, and the low two bits \u2260 11.",
+        "Immediate formats are given with bit slicing for I/S/B/U/J.",
+        "The register file is specified with the x0 rule and the write-through bypass.",
+        "The ID/EX register contents are listed, including valid, PC, instruction bits and the trap flag."
+      ]
+    },
+    {
+      "id": "S5",
+      "title": "EX stage: ALU, branch comparator, target adders, forwarding network and trap detection point",
+      "goal": "Define the EX datapath:\n- the ALU operations;\n- branch condition evaluation, signed and unsigned;\n- JAL/JALR/branch target computation, with JALR clearing bit 0;\n- the link (PC+4) value;\n- forwarding muxes for rs1, rs2 and store data, sourced from EX/MEM and MEM/WB.\nAlso define EX as the point where a valid trap-flagged instruction raises the halt request, using its PC as halt_pc.",
+      "spec_evidence": [
+        {
+          "section": "P2",
+          "quote": "Resolve data hazards with forwarding wherever possible; stall only for load-use."
+        },
+        {
+          "section": "P2",
+          "quote": "Branches and jumps are resolved in EX. Static predict-not-taken. Flush wrong-path instructions on a redirect."
+        }
+      ],
+      "decisions": [
+        {
+          "id": "D5",
+          "topic": "Forwarding paths",
+          "options": [
+            "EX/MEM\u2192EX and MEM/WB\u2192EX (incl. load data) for both operands and store data; 1-cycle load-use stall",
+            "Additional MEM-stage store-data forwarding"
+          ],
+          "status": "decided",
+          "choice": "Forward from EX/MEM (ALU or link result) and from MEM/WB (ALU, link or extended load data) into both EX operand muxes. These muxes also feed the branch comparator and the store-data path. The youngest producer wins. Load-use is the only stall, and it lasts 1 cycle.",
+          "rationale": "R3 requires forwarding wherever possible and allows stalls only for load-use.",
+          "impact": "medium",
+          "confidence": "high",
+          "question": ""
+        },
+        {
+          "id": "D6",
+          "topic": "Control-transfer resolution point and penalty",
+          "options": [
+            "All branches/JAL/JALR resolved in EX, 2-cycle taken penalty",
+            "JAL resolved early in ID"
+          ],
+          "status": "decided",
+          "choice": "All branches, JAL and JALR resolve in EX, with static not-taken prediction. A taken branch or jump squashes the IF and ID instructions, giving 2 bubbles.",
+          "rationale": "R4 explicitly requires resolution in EX.",
+          "impact": "medium",
+          "confidence": "high",
+          "question": ""
+        }
+      ],
+      "depends_on": [
+        "S4"
+      ],
+      "output_section": [
+        "Datapath",
+        "Control Logic"
+      ],
+      "done_when": [
+        "The ALU op list covers all R1 ops, with shift-amount slicing.",
+        "The forwarding-select equations are written, including the rd\u22600, RegWrite and valid qualifications and the priority.",
+        "Redirect target and redirect valid are defined for branches, JAL and JALR (target & ~1).",
+        "The trap-request signal is defined as (EX valid & trap flag), together with how halt_pc is captured.",
+        "It is stated that store data and the branch compare use forwarded values."
+      ]
+    },
+    {
+      "id": "S6",
+      "title": "MEM/WB stages: dmem access timing, byte-lane strobes and load extension",
+      "goal": "Specify when the dmem address, enable, write enable, strobe and write data are driven. Specify that synchronous read data returns one cycle later, and how it is lane-selected and sign- or zero-extended for LB/LH/LW/LBU/LHU. Specify the write-back mux.",
+      "spec_evidence": [
+        {
+          "section": "P2",
+          "quote": "The data port supports byte, halfword and word access with byte write strobes."
+        },
+        {
+          "section": "P2",
+          "quote": "Misaligned accesses are not expected from the software."
+        },
+        {
+          "section": "P2",
+          "quote": "Both are synchronous memories with a fixed 1-cycle read latency and no wait states (tightly coupled SRAM)."
+        }
+      ],
+      "decisions": [
+        {
+          "id": "D7",
+          "topic": "dmem request stage and load-data alignment location",
+          "options": [
+            "Drive dmem from the EX/MEM register in MEM; data returns in WB; lane-select and extend in WB",
+            "Drive dmem combinationally from the EX ALU output so data returns in MEM"
+          ],
+          "status": "defaulted",
+          "choice": "Drive dmem from the EX/MEM register during MEM, so load data arrives in WB. Lane select and extension happen in WB using the registered addr[1:0] and size. The extended value is the MEM/WB forwarding source.",
+          "rationale": "This keeps the ALU\u2192SRAM-address path out of EX and keeps the load-use penalty at 1 cycle. The resulting critical path is SRAM out \u2192 extend \u2192 forward mux \u2192 ALU.",
+          "impact": "medium",
+          "confidence": "medium",
+          "question": "Should the data-memory address be driven from a registered MEM-stage value (load data returning in WB), or combinationally from the EX ALU result (load data returning in MEM)?"
+        },
+        {
+          "id": "D8",
+          "topic": "Misaligned data and instruction-target addresses",
+          "options": [
+            "No detection: use addr[1:0] for lane select; misaligned targets undefined",
+            "Detect and flag via an output, or halt like an illegal instruction"
+          ],
+          "status": "defaulted",
+          "choice": "There is no detection. Misaligned data accesses give implementation-defined lane behaviour. Branch and jump targets are used as computed, with bit 0 cleared for JALR, and misaligned targets are documented as undefined. They do not use the halt path.",
+          "rationale": "R6 says software will not generate misaligned accesses. The halt path from the R11 answer is scoped to illegal encodings, ECALL and EBREAK only.",
+          "impact": "low",
+          "confidence": "medium",
+          "question": "Since misaligned accesses are not expected, may the core ignore them (undefined result), or should misaligned data or branch-target addresses also halt the core like an illegal instruction?"
+        }
+      ],
+      "depends_on": [
+        "S5"
+      ],
+      "output_section": [
+        "Datapath",
+        "Timing & Pipeline",
+        "Corner Cases & Error Handling"
+      ],
+      "done_when": [
+        "A byte-strobe table is given per size and addr[1:0], together with the write-data lane replication.",
+        "Load extraction and extension equations are given for all five load types.",
+        "dmem request and response timing is shown relative to the stages.",
+        "The write-back mux sources are listed: ALU, PC+4, load data, LUI immediate and AUIPC result.",
+        "It is stated that the dmem enable and write are qualified by MEM valid."
+      ]
+    },
+    {
+      "id": "S7",
+      "title": "Hazard and halt control: load-use stall, redirect flush, trap-halt sequence and imem_en",
+      "goal": "Define the stall, flush and halt control.\n- Load-use: compare the ID rs1/rs2 (when actually used) against an EX load's rd. On a match, hold pc_f and IF/ID, set imem_en = 0, and insert a bubble into ID/EX.\n- Redirect in EX: squash IF/ID and ID/EX.\n- Trap in EX: flush the younger IF/ID and ID/EX, kill the trapping instruction so it neither retires nor writes, let the older MEM and WB instructions drain and retire, set the registered halted flag, and stop fetch with imem_en = 0.\nDefine the priority among these events.",
+      "spec_evidence": [
+        {
+          "section": "P2",
+          "quote": "stall only for load-use."
+        },
+        {
+          "section": "P2",
+          "quote": "Flush wrong-path instructions on a redirect."
+        },
+        {
+          "section": "P2",
+          "quote": "Static predict-not-taken."
+        },
+        {
+          "section": "P2",
+          "quote": "Illegal instruction handling: TBD."
+        }
+      ],
+      "decisions": [
+        {
+          "id": "D9",
+          "topic": "Bubble representation in the pipeline",
+          "options": [
+            "Per-stage valid bit gating all side effects",
+            "Inject canonical NOP into pipeline registers"
+          ],
+          "status": "defaulted",
+          "choice": "Each pipeline register carries a valid bit. Flush, stall and trap bubbles clear it. Every side effect is qualified by it: RegWrite, dmem enable and write, redirect, trap request and trace valid.",
+          "rationale": "This makes trace valid trivial and guarantees that squashed stores never reach dmem. It also fits the Q1 answer, which already squashes IF/ID by clearing valid bits.",
+          "impact": "medium",
+          "confidence": "high",
+          "question": "Is a per-stage valid bit acceptable for bubbles and flushes, or is NOP injection required?"
+        },
+        {
+          "id": "D12",
+          "topic": "Illegal instruction handling (R11)",
+          "options": [
+            "NOP + flag output",
+            "Halt the core with an error output",
+            "Silently NOP"
+          ],
+          "status": "decided",
+          "choice": "Illegal encodings, ECALL and EBREAK trap in EX and halt the core.\n- halted is asserted as a registered output, and halt_pc gives the trapping PC.\n- Older instructions drain and retire.\n- The trapping instruction does not retire, and younger instructions are flushed.\n- Fetch stops, and only rst exits the halt.",
+          "rationale": "Settled by the user's answer to Q2.",
+          "impact": "medium",
+          "confidence": "high",
+          "question": ""
+        }
+      ],
+      "depends_on": [
+        "S3",
+        "S5",
+        "S6"
+      ],
+      "output_section": [
+        "Control Logic",
+        "Timing & Pipeline"
+      ],
+      "done_when": [
+        "The load-use equations are written, excluding unused rs1/rs2 (LUI, AUIPC, JAL), rd=x0 and invalid or trap-flagged ID instructions.",
+        "Priority is stated and justified: reset > trap/halt > redirect > load-use stall.",
+        "imem_en and pc_next are consistent with S3 during stall, flush and halt.",
+        "The halt state machine is specified: the trap request sets halted on the next edge, halted is sticky until rst, halt_pc is captured, and no new valid instructions enter.",
+        "Cycle diagrams cover load-use, a taken branch, JALR after a load, back-to-back taken branches, and an illegal instruction behind an older load and store."
+      ]
+    },
+    {
+      "id": "S8",
+      "title": "Clocking and synchronous reset sequence to RESET_PC, including exit from halt",
+      "goal": "Specify the single clock domain and the synchronous active-high reset. Specify which flops are reset: PC, all valid bits, halted and halt_pc as needed. Specify which are left unreset: the datapath and the register file. Specify the first fetch: imem_addr = RESET_PC with imem_en = 1 during reset, so that the first instruction reaches ID on the correct cycle after reset is released. State that rst is the only exit from halt.",
+      "spec_evidence": [
+        {
+          "section": "P2",
+          "quote": "Reset vector is configurable at build time. Single clock, synchronous active-high reset."
+        }
+      ],
+      "decisions": [
+        {
+          "id": "D10",
+          "topic": "Reset scope and first fetch",
+          "options": [
+            "Reset PC, valid bits and halt state only; register file not reset; imem_addr = RESET_PC with imem_en=1 during reset",
+            "Reset all flops including the register file"
+          ],
+          "status": "decided",
+          "choice": "Single clock with synchronous active-high reset.\n- pc_f is set to RESET_PC, all valid bits are cleared and halted is cleared.\n- During reset, imem_addr = RESET_PC with imem_en = 1, as in the Q1 answer.\n- The register file is not reset; x0 is hard-wired.",
+          "rationale": "R8 and the Q1/Q2 answers settle the clock, the reset style, the vector, the first-fetch behaviour and that rst exits the halt.",
+          "impact": "low",
+          "confidence": "high",
+          "question": ""
+        }
+      ],
+      "depends_on": [
+        "S3",
+        "S7"
+      ],
+      "output_section": [
+        "Clocking & Reset"
+      ],
+      "done_when": [
+        "A reset-value table is given for every control flop, including halted and halt_pc.",
+        "A cycle-by-cycle sequence runs from reset deassertion to the first retire, without a duplicate fetch of RESET_PC.",
+        "It is stated that asserting rst while halted restarts from RESET_PC.",
+        "It is stated that there are no other clock domains and no CDC."
+      ]
+    },
+    {
+      "id": "S9",
+      "title": "Retire-trace port sourced from WB for ISS lock-step, with halt-aware retirement",
+      "goal": "Define the trace port. At most one instruction retires per cycle, in program order, from WB. The fields are valid, PC, instruction, rd and write data, where write data is the final extended load value. Define how non-writing instructions are reported. State that the trapping instruction never asserts trace valid, so the ISS comparison ends at the last older retire and the testbench uses halted/halt_pc to check the trap.",
+      "spec_evidence": [
+        {
+          "section": "P2",
+          "quote": "Provide a retire-trace port (PC, instruction, rd, write data, valid) for lock-step comparison with a reference ISS."
+        }
+      ],
+      "decisions": [
+        {
+          "id": "D11",
+          "topic": "Trace port timing and content for non-writing instructions",
+          "options": [
+            "Combinational from WB; rd=0 and wdata=0 when no register write; no extra fields",
+            "Registered one cycle after WB",
+            "Add mem address/data/strobe and a reg-write-enable field"
+          ],
+          "status": "defaulted",
+          "choice": "Drive the trace combinationally from the WB stage, with valid = WB valid. Instructions with no register write, or with rd=x0, report rd=0 and data=0. Stores are traced only by PC and instruction. The trapping instruction is not traced.",
+          "rationale": "This matches R10's field list and the Q2 answer that the trapping instruction does not retire. The lack of store visibility is recorded as an open question.",
+          "impact": "medium",
+          "confidence": "medium",
+          "question": "For the retire trace, should instructions that write no register report rd=0/data=0, and should store address/data/strobes also be added to the trace?"
+        }
+      ],
+      "depends_on": [
+        "S6",
+        "S7"
+      ],
+      "output_section": [
+        "Interface",
+        "Datapath",
+        "Verification Plan"
+      ],
+      "done_when": [
+        "Trace field widths and their sourcing from the MEM/WB registers are specified.",
+        "It is shown that PC and instruction bits are carried down the pipeline.",
+        "The rule for non-writing instructions is stated.",
+        "It is confirmed that flushed, bubbled and trapping instructions never assert valid, and that older instructions in MEM/WB at trap time still retire."
+      ]
+    },
+    {
+      "id": "S10",
+      "title": "Corner cases: trap interactions, x0, and hazard combinations",
+      "goal": "Document the corner cases with their expected behaviour:\n- Trap interactions: a trap-flagged instruction in the shadow of a taken branch (squashed, no halt); a trap in EX while an older store is in MEM (the store completes); a trap-flagged instruction stalled behind a load-use (no spurious stall from garbage rs fields); a trap in EX coinciding with a redirect being impossible (same stage, one instruction).\n- x0: forwarding suppression for rd=x0 and loads to x0.\n- Hazard combinations: a branch or JALR depending on a load (stall then forward), store data forwarded from a load, and a redirect with a pending load-use stall.",
+      "spec_evidence": [
+        {
+          "section": "P2",
+          "quote": "Illegal instruction handling: TBD."
+        },
+        {
+          "section": "P2",
+          "quote": "No CSRs, interrupts or privilege modes in this version."
+        },
+        {
+          "section": "P2",
+          "quote": "x0 is hard-wired to zero."
+        },
+        {
+          "section": "P2",
+          "quote": "Misaligned accesses are not expected from the software."
+        }
+      ],
+      "decisions": [],
+      "depends_on": [
+        "S4",
+        "S7",
+        "S9"
+      ],
+      "output_section": [
+        "Corner Cases & Error Handling",
+        "Assumptions & Open Questions"
+      ],
+      "done_when": [
+        "A corner-case table lists each combination above with the expected behaviour and cycle count.",
+        "It is stated that a trap-flagged instruction on the wrong path never sets halted.",
+        "The misaligned-access behaviour from D8 is recorded."
+      ]
+    },
+    {
+      "id": "S11",
+      "title": "Block diagram and end-to-end pipeline timing for Fivestage",
+      "goal": "Produce the consolidated block diagram:\n- the five stages, pipeline registers and two SRAM ports;\n- the combinational pc_next \u2192 imem_addr path;\n- the forwarding network, hazard and halt unit, redirect path and trace tap.\nProduce a timing summary with CPI analysis (load-use = 1 stall, taken transfer = 2 bubbles) and the critical paths.",
+      "spec_evidence": [
+        {
+          "section": "P2",
+          "quote": "Classic 5-stage in-order pipeline: IF, ID, EX, MEM, WB."
+        },
+        {
+          "section": "P2",
+          "quote": "Target CPI close to 1."
+        }
+      ],
+      "decisions": [],
+      "depends_on": [
+        "S3",
+        "S4",
+        "S5",
+        "S6",
+        "S7",
+        "S9"
+      ],
+      "output_section": [
+        "Block Diagram",
+        "Timing & Pipeline"
+      ],
+      "done_when": [
+        "The diagram shows every pipeline register, the SRAM output captured into IF/ID, and the halt logic.",
+        "A penalty table covers each hazard class, plus the trap-drain behaviour.",
+        "At least two critical paths are identified: EX redirect \u2192 pc_next \u2192 imem_addr, and dmem rdata \u2192 extend \u2192 forward \u2192 ALU/branch compare \u2192 redirect."
+      ]
+    },
+    {
+      "id": "S12",
+      "title": "Verification plan: ISS lock-step via the trace port, halt checks and directed hazard tests",
+      "goal": "Plan verification:\n- run a reference ISS in lock-step on trace valid;\n- run riscv-tests rv32ui, adapting the pass/fail signalling to ECALL/EBREAK halting;\n- run constrained-random aligned streams;\n- add directed forwarding, stall and flush tests, strobe and extension checks, x0 checks, and reset-vector checks;\n- add trap tests for illegal encodings, ECALL, EBREAK and FENCE.I that check halted, halt_pc, the drain of older instructions and that the trapping instruction does not retire;\n- add assertions and coverage.",
+      "spec_evidence": [
+        {
+          "section": "P2",
+          "quote": "for lock-step comparison with a reference ISS."
+        },
+        {
+          "section": "P2",
+          "quote": "Misaligned accesses are not expected from the software."
+        },
+        {
+          "section": "P2",
+          "quote": "Target CPI close to 1."
+        }
+      ],
+      "decisions": [],
+      "depends_on": [
+        "S9",
+        "S10",
+        "S11"
+      ],
+      "output_section": [
+        "Verification Plan",
+        "Assumptions & Open Questions"
+      ],
+      "done_when": [
+        "The testbench is described: 1-cycle SRAM models that hold their output when enable is low, the ISS comparator, the store checker and the halt monitor.",
+        "The test list maps to requirements R1\u2013R11.",
+        "Assertions are listed: no dmem write while invalid; x0 never written; at most one retire per cycle; single-cycle load-use stall; imem_en=0 and no retire after halted except for older drains; halted sticky until rst.",
+        "A CPI measurement is planned.",
+        "The remaining defaulted decisions (D4, D7, D8, D9, D11) are listed as open questions in Assumptions."
+      ]
+    }
+  ],
+  "assumptions": [
+    {
+      "decision_id": "D4",
+      "topic": "Register-file WB\u2192ID same-cycle hazard",
+      "assumed": "Use a flop-based 31\u00d732 register file written on posedge, with a combinational write-through bypass on address match (rd\u22600).",
+      "impact": "low",
+      "confidence": "high",
+      "question": "Is a flop-based register file with internal write-through bypass acceptable, or must it map to a specific SRAM/latch macro?"
+    },
+    {
+      "decision_id": "D7",
+      "topic": "dmem request stage and load-data alignment location",
+      "assumed": "Drive dmem from the EX/MEM register during MEM, so load data arrives in WB. Lane select and extension happen in WB using the registered addr[1:0] and size. The extended value is the MEM/WB forwarding source.",
+      "impact": "medium",
+      "confidence": "medium",
+      "question": "Should the data-memory address be driven from a registered MEM-stage value (load data returning in WB), or combinationally from the EX ALU result (load data returning in MEM)?"
+    },
+    {
+      "decision_id": "D8",
+      "topic": "Misaligned data and instruction-target addresses",
+      "assumed": "There is no detection. Misaligned data accesses give implementation-defined lane behaviour. Branch and jump targets are used as computed, with bit 0 cleared for JALR, and misaligned targets are documented as undefined. They do not use the halt path.",
+      "impact": "low",
+      "confidence": "medium",
+      "question": "Since misaligned accesses are not expected, may the core ignore them (undefined result), or should misaligned data or branch-target addresses also halt the core like an illegal instruction?"
+    },
+    {
+      "decision_id": "D9",
+      "topic": "Bubble representation in the pipeline",
+      "assumed": "Each pipeline register carries a valid bit. Flush, stall and trap bubbles clear it. Every side effect is qualified by it: RegWrite, dmem enable and write, redirect, trap request and trace valid.",
+      "impact": "medium",
+      "confidence": "high",
+      "question": "Is a per-stage valid bit acceptable for bubbles and flushes, or is NOP injection required?"
+    },
+    {
+      "decision_id": "D11",
+      "topic": "Trace port timing and content for non-writing instructions",
+      "assumed": "Drive the trace combinationally from the WB stage, with valid = WB valid. Instructions with no register write, or with rd=x0, report rd=0 and data=0. Stores are traced only by PC and instruction. The trapping instruction is not traced.",
+      "impact": "medium",
+      "confidence": "medium",
+      "question": "For the retire trace, should instructions that write no register report rd=0/data=0, and should store address/data/strobes also be added to the trace?"
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+[
+  {
+    "id": "Q1",
+    "decision_id": "D9",
+    "question": "Will MMIO be routed around the D-cache by the core/SoC, or must the cache provide an uncached address range? If it must, how should single-word or sub-word device accesses appear on a bus that only supports full-line bursts?",
+    "in_doc": true,
+    "answer": "The cache provides no uncached path. All accesses on the CPU port are cached. The core or a wrapper must decode MMIO ranges and route them around the cache. Because the cache does not handle device accesses, the full-line burst question does not arise for it. A cpu_req_uncached bit with single-beat transactions is only a possible future option, and it would require extending the interconnect protocol."
+  },
+  {
+    "id": "Q2",
+    "decision_id": "D10",
+    "question": "Do you need cache maintenance for DMA coherence? If so, are whole-cache flush (clean+invalidate) and invalidate-all on a separate sideband port enough, or do you need per-address/per-line ops issued through the CPU request port?",
+    "in_doc": true,
+    "answer": "No. Cache maintenance ops are not supported in this version, and there is no invalidate path. A flush_req/inv_req sideband port that walks all 128 indices is only a proposed follow-up. Per-address or per-line ops are not mentioned."
+  }
+]

@@ -1,0 +1,136 @@
+{
+  "score": {
+    "key_decisions": 13,
+    "matches": 13,
+    "differs": 0,
+    "missing": 0,
+    "spec_silent": 12,
+    "spec_silent_differs": 0,
+    "material_differs": 0,
+    "needless_questions": 0,
+    "coverage": 1.0,
+    "agreement": 1.0,
+    "sound": 1.0
+  },
+  "key_decisions": [
+    {
+      "decision": "Read-side presentation mode",
+      "ma_choice": "FWFT: the head entry is visible on rd_data whenever empty is low, and rd_en pops it in the same cycle with zero read latency.",
+      "spec_settles_it": true,
+      "in_plan": "matches",
+      "plan_choice": "FWFT; rd_data shows the oldest entry while empty==0 and rd_en pops it in the same cycle.",
+      "difference": "none",
+      "note": "The spec explicitly requests show-ahead/FWFT."
+    },
+    {
+      "decision": "Storage structure",
+      "ma_choice": "Async-read register array (LUTRAM on FPGA, flop array plus mux on ASIC), recommended up to ~64 entries. A sync-read block RAM with a 1-entry prefetch register is deferred to a future MEM_STYLE parameter.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "Same async-read register array, ~64 recommendation, and deferred MEM_STYLE block-RAM plus prefetch variant (via Q1).",
+      "difference": "none",
+      "note": "Resolved through Q1, with the answer matching the MA."
+    },
+    {
+      "decision": "rd_data registered or combinational",
+      "ma_choice": "rd_data driven combinationally from the async read mux indexed by the registered rd_ptr.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "Combinational from the array mux driven by the registered rd_ptr; no path from rd_en to rd_data.",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Allowed DEPTH and pointer scheme",
+      "ma_choice": "Power-of-two DEPTH (2..65536) checked at elaboration; pointers ADDR_W+1 bits with a wrap MSB.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "Power-of-two only, minimum 2, upper bound 65536, elaboration assertion, log2(DEPTH)+1-bit pointers with wrap bit.",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Status flag generation",
+      "ma_choice": "Registered full/empty/almost_full/level, all computed from level_n (next-state level). Pointer-derived full/empty kept only as an assertion cross-check.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "Registered full, empty and count computed from next-state values; almost_full registered as count_next >= af_thresh.",
+      "difference": "none",
+      "note": "The plan does not mention the pointer-based assertion cross-check, but the architecture is identical."
+    },
+    {
+      "decision": "almost_full threshold mechanism",
+      "ma_choice": "Runtime input port af_thresh of width ADDR_W+1, quasi-static. almost_full = level >= af_thresh; thresh 0 means always on, > DEPTH means never.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "Runtime af_thresh port of width log2(DEPTH)+1 with almost_full = count >= af_thresh. Threshold edge cases 0 and > DEPTH and runtime-change behaviour (one-cycle lag) are covered.",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Fill-level count output",
+      "ma_choice": "level output of width ADDR_W+1 (0..DEPTH), also used to derive the flags.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "count output of width log2(DEPTH)+1, also used internally for almost_full.",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Simultaneous read+write when full",
+      "ma_choice": "Both accepted: wr_fire = wr_en && (!full_q || rd_fire). No overflow is flagged, and there is an internal combinational rd_en-to-write-enable path.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "Both accepted with wr_accept = wr_en && (!full || rd_en); no overflow; the rd_en-to-wr_accept path is noted as critical.",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Simultaneous read+write when empty",
+      "ma_choice": "No bypass. Only the write is accepted, the read sets underflow, and data is visible the next cycle.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "No bypass; write accepted, read ignored and flags underflow, data visible next cycle (via Q2).",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Error flag set conditions",
+      "ma_choice": "overflow on wr_en && !wr_fire; underflow on rd_en && !rd_fire.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "overflow on wr_en && !wr_accept; underflow on rd_en && empty_q.",
+      "difference": "none",
+      "note": "The two underflow expressions are equivalent."
+    },
+    {
+      "decision": "Sticky error clear mechanism and priority",
+      "ma_choice": "Single shared err_clr pulse clears both flags; err_clr wins over a same-cycle new error (to be confirmed with SW); no internal register interface.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "Single shared err_clr pulse; clear wins; no register interface; priority marked as to be confirmed (via Q3).",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Reset strategy",
+      "ma_choice": "Active-low rst_n, asynchronous assert and synchronous deassert from an external synchronizer. Control flops are reset (empty=1); mem is not reset.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "Async-assert active-low rst_n on control flops, deassertion synchronised upstream, memory array not reset.",
+      "difference": "none",
+      "note": "The spec fixes only the polarity."
+    },
+    {
+      "decision": "Critical-path and throughput characterization",
+      "ma_choice": "1 read and 1 write per cycle sustained. Critical paths are rd_ptr\u2192read mux\u2192rd_data and level\u2192adder\u2192compare\u2192flag.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "1 word/cycle each direction. Critical paths listed as rd_en\u2192wr_accept\u2192write enable and rd_ptr\u2192mux\u2192rd_data.",
+      "difference": "none",
+      "note": "The plan omits the level adder/compare path but adds the rd_en\u2192wr_accept path. The overall characterization is consistent."
+    }
+  ],
+  "needless_questions": [],
+  "summary": "The plan matches the reference MA on essentially every architecture-level decision: FWFT with an async-read register array and a deferred MEM_STYLE block-RAM variant, power-of-two DEPTH with wrap-bit pointers, registered flags from next-state level, a runtime af_thresh port, accept-both at full, no bypass at empty, a shared err_clr with clear priority, and async-assert reset with unreset memory. All three questions targeted genuinely open points the spec left ambiguous (memory style for deep FIFOs, read+write at empty, clear mechanism), so none were needless. The answers align exactly with the MA. Only trivial omissions exist, such as the pointer-based assertion cross-check."
+}

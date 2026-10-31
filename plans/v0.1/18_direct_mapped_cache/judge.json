@@ -1,0 +1,148 @@
+{
+  "score": {
+    "key_decisions": 14,
+    "matches": 12,
+    "differs": 2,
+    "missing": 0,
+    "spec_silent": 13,
+    "spec_silent_differs": 2,
+    "material_differs": 2,
+    "needless_questions": 2,
+    "coverage": 1.0,
+    "agreement": 0.857,
+    "sound": 0.857
+  },
+  "key_decisions": [
+    {
+      "decision": "Hit pipeline structure",
+      "ma_choice": "Two stages: S0 accepts the request and reads the tag and data SRAMs; S1 does the tag compare and returns load data straight from the SRAM output. Load hits take 1 cycle at one per cycle.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "Two stages: the accept cycle drives the SRAM reads and the next cycle does the compare and response, giving full-rate read hits.",
+      "difference": "none",
+      "note": "The spec fixes the latency and throughput; the two-stage split follows directly from 1-cycle SRAMs."
+    },
+    {
+      "decision": "cpu_req_ready generation during back-to-back loads",
+      "ma_choice": "cpu_req_ready = IDLE \\| (s1_hit & ~s1_we). Ready depends combinationally on the tag compare, which is accepted as the critical path. A registered-ready fallback is noted only as an option.",
+      "spec_settles_it": false,
+      "in_plan": "differs",
+      "plan_choice": "Speculative accept with a one-entry replay holding register. req_ready uses only registered state, and the younger request is replayed after a miss.",
+      "difference": "material",
+      "note": "The plan adds a replay register and a second request in flight during a miss, and makes ready independent of hit. That changes the control structure and CPU-visible acceptance behaviour."
+    },
+    {
+      "decision": "Store hit implementation",
+      "ma_choice": "2-cycle store with no store buffer. The byte-enabled data write happens in S1 and the response is issued the same cycle. Ready is low that cycle, so stores run at one per 2 cycles.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "Same: 2-cycle store with the write and response in the compare cycle and req_ready deasserted.",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "SRAM organisation",
+      "ma_choice": "1024x32 word-addressed data SRAM with 4 byte enables, plus a 128x20 tag SRAM, both single-port.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "1024x32 data SRAM addressed by {index,word} with byte enables, plus a 128x20 tag SRAM.",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Valid/dirty storage",
+      "ma_choice": "128-bit flop vectors for valid and dirty; reset clears them in one cycle.",
+      "spec_settles_it": true,
+      "in_plan": "matches",
+      "plan_choice": "Two 128-bit flop arrays cleared by reset.",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Victim writeback datapath",
+      "ma_choice": "8x32 victim line buffer filled from the SRAM over 9 cycles, which decouples SRAM reads from wready backpressure.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "8-word victim buffer copied out of the SRAM before the writeback burst.",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Ordering of writeback and refill on a dirty miss",
+      "ma_choice": "Serial: the writeback burst completes and the FSM waits for mem_wdone before issuing the refill read. Overlap is deferred until interconnect ordering is confirmed.",
+      "spec_settles_it": false,
+      "in_plan": "differs",
+      "plan_choice": "Parallel: the refill read is issued after the victim is copied while the writeback drains from the buffer. Later misses that need the buffer or the victim address wait for write-done.",
+      "difference": "material",
+      "note": "The plan needs concurrent bus channel sequencing, outstanding-writeback tracking and address-hazard checks, and its miss latency differs. The FSM structure changes substantially."
+    },
+    {
+      "decision": "Miss completion mechanism",
+      "ma_choice": "Refill the line, then go through a REPLAY state that re-reads the SRAMs, so the original load or store completes as a normal hit. A store miss sets dirty on the replayed hit.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "Refill the whole line, then replay the original request through the lookup pipeline, with the response coming from the replayed hit.",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Critical-word-first / early restart",
+      "ma_choice": "Neither. Bursts start at word 0, and early restart is listed as a future option.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "No CWF and no early restart; the response follows the full refill and the replay.",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Refill write policy into SRAM",
+      "ma_choice": "Each rvalid beat is written directly into the data SRAM with full byte enables. The tag is written and valid set and dirty cleared on rlast. The SRAM is never contended during RF_DATA.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "8 incoming beats are written unconditionally into the data SRAM, which is guaranteed free whenever rd_valid can occur; tag/valid/dirty are then updated.",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Uncached/MMIO support",
+      "ma_choice": "No uncached path; all accesses are cached and MMIO is routed around the cache externally.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "No uncached path; the core or a wrapper decodes MMIO.",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Cache maintenance ops",
+      "ma_choice": "None; a flush/inv sideband is a proposed follow-up.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "None; a flush_req/inv_req sideband is a follow-up.",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Clocking and reset",
+      "ma_choice": "Single clock; active-low, async-assert/sync-deassert reset. Control state and valid/dirty are reset; the SRAMs are not.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "Same single clock and active-low async-assert/sync-deassert reset, with SRAMs not reset.",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Blocking miss handling / CPU stall",
+      "ma_choice": "Blocking: one miss is serviced by a central FSM and cpu_req_ready stays low throughout.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "Blocking miss FSM; req_ready is gated on FSM idle.",
+      "difference": "none",
+      "note": "The plan's parallel writeback still keeps the CPU stalled until replay."
+    }
+  ],
+  "needless_questions": [
+    "Q1",
+    "Q2"
+  ],
+  "summary": "The plan matches the MA on most structural choices: two-stage hit pipeline, 2-cycle stores without a store buffer, a 1024x32 data plus 128x20 tag SRAM, flop valid/dirty, an 8-word victim buffer, replay-based miss completion, no CWF, no uncached path, no maintenance ops, and the same clock/reset scheme. There are two material divergences. First, the plan makes req_ready registered-only with speculative accept and a replay register, whereas the MA lets ready depend on the tag compare. Second, the plan overlaps the dirty writeback with the refill read, tracking write-done hazards, whereas the MA serialises the writeback, waits for wdone, and then refills. Q1 and Q2 were needless: the spec explicitly delegated MMIO and maintenance to the designer ('Make a call and tell us what you assumed'), so the plan should have defaulted them rather than asking."
+}

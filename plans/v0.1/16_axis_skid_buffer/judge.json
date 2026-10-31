@@ -1,0 +1,145 @@
+{
+  "score": {
+    "key_decisions": 14,
+    "matches": 12,
+    "differs": 2,
+    "missing": 0,
+    "spec_silent": 13,
+    "spec_silent_differs": 2,
+    "material_differs": 0,
+    "needless_questions": 0,
+    "coverage": 1.0,
+    "agreement": 0.857,
+    "sound": 1.0
+  },
+  "key_decisions": [
+    {
+      "decision": "Slice topology",
+      "ma_choice": "Two-register 'output + skid' buffer. m_* is always driven from out_q, and the skid register catches the one beat accepted in the stall cycle. Chosen over a 2-entry circular FIFO.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "D1: a main register drives m_axis_* and a single skid register catches the in-flight beat; 2-entry FIFO and cascade were rejected.",
+      "difference": "none",
+      "note": "The spec forces 2 entries of storage. The output+skid form versus a FIFO is an architect's choice."
+    },
+    {
+      "decision": "Output driving / mux placement",
+      "ma_choice": "All outputs come straight from flops. A single 2:1 mux on the out_q D-input picks skid_q or s_payload, selected by the skid_valid_q flop.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "D4/S4: outputs come directly from flop Q. One 2:1 mux sits in front of the main register and selects skid vs. input.",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Registered s_tready generation",
+      "ma_choice": "s_tready = !skid_valid_q, a direct inversion of a flop. It is low only while the skid register is full.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "A dedicated s_tready flop with s_tready_next = !skid_valid_next.",
+      "difference": "none",
+      "note": "Logically identical. The plan uses a dedicated flop instead of an inverter on skid_valid_q."
+    },
+    {
+      "decision": "Control structure",
+      "ma_choice": "An implicit 3-state FSM (EMPTY/ONE/TWO) built from out_valid_q and skid_valid_q. Skid cannot be full while out is empty. Next-state equations are keyed on out_free.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "S6: a 3-state occupancy machine (EMPTY/ONE/FULL) derived from {m_tvalid, skid_valid}, with a full transition table.",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Payload packing",
+      "ma_choice": "tdata/tkeep/tlast/tuser are packed into one PAY_W vector that is stored and muxed as a unit.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "S3/S5: one packed payload vector, with the width formula given.",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Latency",
+      "ma_choice": "1 cycle normally, 2 cycles for a beat that skids.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "D9: 1-cycle latency; the skid register is used only on stall.",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Throughput / stall recovery",
+      "ma_choice": "1 beat/clk with m_tready high. No bubble when a stall releases. Exactly one s_tready-low cycle per stall episode.",
+      "spec_settles_it": true,
+      "in_plan": "matches",
+      "plan_choice": "S7: sustained 1 beat/clk, and throughput returns immediately after a stall releases.",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "TUSER handling",
+      "ma_choice": "USER_W parameter, default 0. A generate block removes tuser from the packing, and the ports stay present at width 1.",
+      "spec_settles_it": false,
+      "in_plan": "differs",
+      "plan_choice": "A USER_EN flag (default 0) plus USER_WIDTH. Storage is not generated when disabled and the output is tied to 0.",
+      "difference": "equivalent",
+      "note": "Both make tuser optional and zero-area by default. Only the parameter mechanism differs."
+    },
+    {
+      "decision": "Width parameterization and TKEEP derivation",
+      "ma_choice": "DATA_W defaults to 64 and must be a multiple of 8. KEEP_W = DATA_W/8 is derived.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "D5: KEEP_WIDTH = DATA_WIDTH/8 as a localparam, with an elaboration check that DATA_WIDTH % 8 == 0.",
+      "difference": "none",
+      "note": "The spec requires a width parameter but not the tkeep derivation."
+    },
+    {
+      "decision": "Other sideband signals",
+      "ma_choice": "No TSTRB/TID/TDEST.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "D3: omit tstrb/tid/tdest.",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Reset style and scope",
+      "ma_choice": "Synchronous active-low aresetn. Only the valid flags are reset and the payload is not. s_tready = 1 during and after reset, since the skid is empty.",
+      "spec_settles_it": false,
+      "in_plan": "differs",
+      "plan_choice": "Synchronous active-low aresetn, with only the control flops reset and the payload not. s_tready is forced to 0 during reset and asserts the first cycle after.",
+      "difference": "equivalent",
+      "note": "Same style and scope. The plan holds s_tready low during reset, which costs one extra flop and changes the visible ready value in reset; both behaviours are AXI-legal."
+    },
+    {
+      "decision": "Clocking",
+      "ma_choice": "Single clock aclk, no CDC.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "D10: single aclk, no CDC.",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "AXI protocol compliance",
+      "ma_choice": "m_tvalid is a flop. out_q loads only when out_free, so the payload stays stable until the handshake.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "D8: strict AXI4-Stream stability, and m_tvalid is independent of m_tready.",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Verification approach",
+      "ma_choice": "Random valid/ready testbench with an in-order scoreboard. SVA for stability and the skid->out invariant, directed stall tests, and a formal/lint check for no comb path.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "S10: randomized testbench with scoreboard, SVA, throughput check, structural/lint no-comb-path check, and width sweeps.",
+      "difference": "none",
+      "note": ""
+    }
+  ],
+  "needless_questions": [],
+  "summary": "The plan closely tracks the reference MA. It chooses the same output+skid topology with flop-driven outputs and one 2:1 mux on the output register input. It also matches on the 3-state occupancy control, packed payload, 1-cycle latency, sync active-low reset with unreset payload, single clock and an equivalent verification strategy. There are two minor, equivalent differences: tuser is gated by a USER_EN flag rather than USER_W=0, and s_tready is a separate flop held low during reset rather than !skid_valid_q, which reads 1 in reset. No questions were asked, so none are needless."
+}

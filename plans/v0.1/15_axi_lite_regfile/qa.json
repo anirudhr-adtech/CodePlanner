@@ -1,0 +1,9 @@
+[
+  {
+    "id": "Q1",
+    "decision_id": "D2",
+    "question": "Is the core attached to ctrl_regs clocked by aclk, or does it run on a different clock that needs CDC for STATUS, event pulses and CMD pulses?",
+    "in_doc": true,
+    "answer": "ctrl_regs assumes everything on the core side is synchronous to aclk, so the block contains no CDC logic. That covers sts_*, evt_set and the cmd_* pulses. If the core actually runs on a different clock, the integrator is responsible for the crossing: 2-flop synchronizers for single bits, and a handshake or Gray-code crossing for FIFO_LEVEL."
+  }
+]

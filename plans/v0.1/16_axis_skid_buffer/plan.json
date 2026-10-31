@@ -1,0 +1,558 @@
+{
+  "steps": [
+    {
+      "id": "S1",
+      "title": "Capture purpose and hard requirements of the packet-engine to egress-shaper AXI-S register slice",
+      "goal": "Write the Overview: state that the block is a fully registered AXI4-Stream slice placed between the packet engine (upstream master) and the egress shaper (downstream slave). It exists to close timing on the forward path (tvalid/tdata) and the backward path (tready). List the three non-negotiables: no combinational path from input to output, 1 beat/clock sustained throughput, and minimal area.",
+      "spec_evidence": [
+        {
+          "section": "P1",
+          "quote": "need an axi-stream register slice to break timing between the packet engine and the"
+        },
+        {
+          "section": "P1",
+          "quote": "we're failing timing on both tvalid/tdata and on tready going back up."
+        },
+        {
+          "section": "P2",
+          "quote": "must register everything in both directions, no comb path in -> out"
+        },
+        {
+          "section": "P2",
+          "quote": "must not lose throughput, 1 beat per clock when nobody stalls"
+        },
+        {
+          "section": "P3",
+          "quote": "that's it, keep it small."
+        }
+      ],
+      "decisions": [
+        {
+          "id": "D1",
+          "topic": "Slice architecture that registers both forward and backward paths at full throughput",
+          "options": [
+            "Two-register skid buffer (main output register + skid register, registered s_tready)",
+            "2-entry FIFO with pointers",
+            "Cascade of a forward-only slice and a backward-only slice"
+          ],
+          "status": "defaulted",
+          "choice": "Two-register skid buffer: a main register drives m_axis_* outputs, and a single skid register catches the in-flight beat when downstream stalls. s_tready is driven from a flop.",
+          "rationale": "This is the minimum storage that registers tvalid/tdata and tready together while sustaining 1 beat/clock: two beat-sized registers, with no pointer logic. It fits 'keep it small'.",
+          "impact": "high",
+          "confidence": "high",
+          "question": "Is a standard 2-entry skid-buffer register slice (2x data storage, 1-cycle latency) acceptable, or do you need a different structure?"
+        }
+      ],
+      "depends_on": [],
+      "output_section": [
+        "Overview"
+      ],
+      "done_when": [
+        "Overview names upstream (packet engine) and downstream (egress shaper) roles.",
+        "Overview lists the three requirements: fully registered, 1 beat/clk, small.",
+        "Overview states the chosen architecture (skid buffer) in one sentence and gives its storage cost (2 beats)."
+      ]
+    },
+    {
+      "id": "S2",
+      "title": "Define slave/master AXI-Stream ports with tdata, tkeep, tlast and an optional tuser hook",
+      "goal": "Specify the complete port list: clock, reset, s_axis_{tvalid,tready,tdata,tkeep,tlast[,tuser]} and m_axis_{tvalid,tready,tdata,tkeep,tlast[,tuser]}. Give direction, width expression and which outputs are flop-driven.",
+      "spec_evidence": [
+        {
+          "section": "P2",
+          "quote": "data is 64 bit, with tkeep and tlast. maybe tuser later"
+        },
+        {
+          "section": "P2",
+          "quote": "must register everything in both directions, no comb path in -> out"
+        }
+      ],
+      "decisions": [
+        {
+          "id": "D2",
+          "topic": "tuser support",
+          "options": [
+            "Omit tuser entirely now",
+            "Include tuser with USER_WIDTH parameter, gated by a USER_EN/width>0 option",
+            "Always include tuser, minimum width 1"
+          ],
+          "status": "defaulted",
+          "choice": "Include s/m_axis_tuser ports sized by USER_WIDTH, with a USER_EN parameter (default 0). When disabled, the tuser storage is not generated and the output is tied to 0.",
+          "rationale": "'maybe tuser later' suggests adding the port now, so the interface does not change at a later integration. Gating keeps area at zero when tuser is unused.",
+          "impact": "medium",
+          "confidence": "medium",
+          "question": "Should tuser be included now as an optional parameterized port (disabled by default), or left out until it is actually needed?"
+        },
+        {
+          "id": "D3",
+          "topic": "Other AXI-Stream sideband signals (tstrb, tid, tdest, twakeup)",
+          "options": [
+            "Omit",
+            "Include as optional parameters"
+          ],
+          "status": "defaulted",
+          "choice": "Omit tstrb/tid/tdest. Only tdata, tkeep, tlast and the optional tuser are carried.",
+          "rationale": "The spec names only tkeep and tlast (and maybe tuser), and asks to keep it small.",
+          "impact": "low",
+          "confidence": "high",
+          "question": "Do you need tid, tdest or tstrb passed through, or only tdata/tkeep/tlast(/tuser)?"
+        },
+        {
+          "id": "D4",
+          "topic": "Output driving: all m_axis_* and s_axis_tready directly from flops",
+          "options": [
+            "All outputs straight from flops (mux only in front of registers)",
+            "Output mux selecting between main and skid registers"
+          ],
+          "status": "decided",
+          "choice": "m_axis_tvalid, m_axis_tdata/tkeep/tlast/tuser and s_axis_tready are each driven directly by a flop Q, with no logic after the register. All muxing sits on the register D inputs.",
+          "rationale": "The spec requires 'no comb path in -> out' and asks to fix timing on both directions. An output mux would put logic after the flops on the timing-critical edge.",
+          "impact": "high",
+          "confidence": "high",
+          "question": ""
+        }
+      ],
+      "depends_on": [
+        "S1"
+      ],
+      "output_section": [
+        "Interface"
+      ],
+      "done_when": [
+        "Port table lists every signal with direction, width formula and description.",
+        "Every output is marked as flop-driven.",
+        "Default tkeep width is shown as DATA_WIDTH/8 = 8 for 64-bit data.",
+        "tuser presence and tie-off behaviour are documented."
+      ]
+    },
+    {
+      "id": "S3",
+      "title": "Parameterize data width and derive tkeep/tuser widths",
+      "goal": "Define the parameter set: DATA_WIDTH (default 64), the derived KEEP_WIDTH, USER_EN and USER_WIDTH. State the legal values and how the packed payload width (data+keep+last+user) is computed, so the datapath stores one vector.",
+      "spec_evidence": [
+        {
+          "section": "P2",
+          "quote": "should be reusable so make the width a parameter"
+        },
+        {
+          "section": "P2",
+          "quote": "data is 64 bit, with tkeep and tlast. maybe tuser later"
+        }
+      ],
+      "decisions": [
+        {
+          "id": "D5",
+          "topic": "tkeep width derivation and DATA_WIDTH constraint",
+          "options": [
+            "KEEP_WIDTH derived as DATA_WIDTH/8, DATA_WIDTH must be a multiple of 8",
+            "KEEP_WIDTH as an independent parameter"
+          ],
+          "status": "defaulted",
+          "choice": "KEEP_WIDTH = DATA_WIDTH/8 as a localparam, with an elaboration-time check that DATA_WIDTH % 8 == 0.",
+          "rationale": "This matches AXI-Stream byte-qualifier semantics and removes a way to misconfigure the block.",
+          "impact": "low",
+          "confidence": "high",
+          "question": "Is it fine to require DATA_WIDTH to be a multiple of 8, with tkeep width derived automatically as DATA_WIDTH/8?"
+        },
+        {
+          "id": "D6",
+          "topic": "Configurable slice modes (bypass / forward-only / backward-only)",
+          "options": [
+            "Single fixed full-registered mode",
+            "REG_MODE parameter selecting bypass/forward/backward/full"
+          ],
+          "status": "defaulted",
+          "choice": "Single fixed fully-registered mode with no mode parameter.",
+          "rationale": "The spec says 'keep it small' and asks only for full registration. Extra modes add verification surface.",
+          "impact": "low",
+          "confidence": "medium",
+          "question": "Do you want a parameter to select bypass, forward-only or backward-only modes for reuse elsewhere, or only the fully registered mode?"
+        }
+      ],
+      "depends_on": [
+        "S2"
+      ],
+      "output_section": [
+        "Parameters"
+      ],
+      "done_when": [
+        "Parameter table lists name, default, legal range and derived localparams.",
+        "Packed payload width formula is written out.",
+        "Elaboration checks are listed (DATA_WIDTH%8, USER_WIDTH>=1 when enabled)."
+      ]
+    },
+    {
+      "id": "S4",
+      "title": "Draw the skid-buffer block diagram: main register, skid register, load mux and ready flop",
+      "goal": "Produce the block diagram. Show input payload going to both the skid register and the main-register input mux, the mux selecting skid vs. input, the main register driving m_axis_*, and the control block owning m_tvalid, skid_valid and the s_tready flop.",
+      "spec_evidence": [
+        {
+          "section": "P2",
+          "quote": "must register everything in both directions, no comb path in -> out"
+        },
+        {
+          "section": "P1",
+          "quote": "we're failing timing on both tvalid/tdata and on tready going back up."
+        }
+      ],
+      "decisions": [],
+      "depends_on": [
+        "S1",
+        "S3"
+      ],
+      "output_section": [
+        "Block Diagram"
+      ],
+      "done_when": [
+        "Diagram shows exactly two payload registers and one 2:1 mux in front of the main register.",
+        "Diagram shows that no wire runs from any s_axis_* input to any m_axis_* output, or from m_axis_tready to s_axis_tready, without passing through a flop.",
+        "Each block is labelled with the signals it owns."
+      ]
+    },
+    {
+      "id": "S5",
+      "title": "Specify main/skid payload register load and select conditions",
+      "goal": "Define the datapath enables. The main register loads when it is empty or being drained (m_tready & m_tvalid); it takes the skid contents if skid is valid, otherwise the input beat. The skid register loads the input beat when an input handshake occurs while the main register is held. tdata, tkeep, tlast and tuser are stored as one packed vector.",
+      "spec_evidence": [
+        {
+          "section": "P2",
+          "quote": "must not lose throughput, 1 beat per clock when nobody stalls"
+        },
+        {
+          "section": "P2",
+          "quote": "data is 64 bit, with tkeep and tlast. maybe tuser later"
+        }
+      ],
+      "decisions": [
+        {
+          "id": "D7",
+          "topic": "Payload register reset policy",
+          "options": [
+            "Reset only valid/ready control flops; payload flops unreset",
+            "Reset all payload flops too"
+          ],
+          "status": "defaulted",
+          "choice": "Only the control flops (m_tvalid, skid_valid, s_tready) are reset. Payload registers have no reset.",
+          "rationale": "This saves area and reset fanout on 64+ bit registers, which fits 'keep it small'. The payload is don't-care while tvalid is low.",
+          "impact": "low",
+          "confidence": "medium",
+          "question": "Is it acceptable that the data/tkeep/tlast registers are not reset (only valid/ready flops are), or does your flow require all flops to be reset?"
+        }
+      ],
+      "depends_on": [
+        "S4"
+      ],
+      "output_section": [
+        "Datapath"
+      ],
+      "done_when": [
+        "Load-enable equations are given for the main and skid registers.",
+        "Mux select equation is given.",
+        "The writeup explains why the packed vector keeps tkeep/tlast/tuser aligned with tdata."
+      ]
+    },
+    {
+      "id": "S6",
+      "title": "Define control state (EMPTY / ONE / FULL) and registered s_tready generation",
+      "goal": "Specify the control logic as a 3-state occupancy machine derived from {m_tvalid, skid_valid}. Give next-state transitions for each combination of input handshake and output handshake. Derive s_tready_next = !skid_valid_next, so s_tready is registered and asserts whenever the skid register will be free next cycle.",
+      "spec_evidence": [
+        {
+          "section": "P1",
+          "quote": "we're failing timing on both tvalid/tdata and on tready going back up."
+        },
+        {
+          "section": "P2",
+          "quote": "must register everything in both directions, no comb path in -> out"
+        }
+      ],
+      "decisions": [
+        {
+          "id": "D8",
+          "topic": "AXI-Stream protocol obligations on the master side",
+          "options": [
+            "Strict AXI4-Stream: m_tvalid independent of m_tready, payload held stable until handshake",
+            "Relaxed"
+          ],
+          "status": "decided",
+          "choice": "Strict AXI4-Stream compliance. Once m_tvalid is asserted, it and the payload stay stable until m_tready is seen. m_tvalid never depends combinationally on m_tready.",
+          "rationale": "An 'axi-stream register slice' implies protocol compliance. The fully registered outputs make this automatic, but it must be stated as a design invariant.",
+          "impact": "medium",
+          "confidence": "high",
+          "question": ""
+        }
+      ],
+      "depends_on": [
+        "S5"
+      ],
+      "output_section": [
+        "Control Logic"
+      ],
+      "done_when": [
+        "The state transition table covers all 3 states x {in_hs, out_hs} combinations.",
+        "An unreachable FULL+input-accept case is shown to be impossible because s_tready is 0 when FULL.",
+        "The s_tready, m_tvalid and skid_valid next-value equations are written."
+      ]
+    },
+    {
+      "id": "S7",
+      "title": "Document 1-cycle latency, sustained 1 beat/clk and stall/recovery cycle behaviour",
+      "goal": "Write the Timing & Pipeline section. Cover the forward latency of one clock, the steady-state throughput of 1 beat/clock with no stalls, and the timing of s_tready deassertion one cycle after a downstream stall begins (absorbed by the skid register). Include waveforms for streaming, downstream stall and release, and upstream bubbles.",
+      "spec_evidence": [
+        {
+          "section": "P2",
+          "quote": "must not lose throughput, 1 beat per clock when nobody stalls"
+        },
+        {
+          "section": "P1",
+          "quote": "we're failing timing on both tvalid/tdata and on tready going back up."
+        }
+      ],
+      "decisions": [
+        {
+          "id": "D9",
+          "topic": "Forward latency",
+          "options": [
+            "1 cycle (input beat appears on m_axis next clock when empty)",
+            "Always 2 cycles (beat always passes through both registers)"
+          ],
+          "status": "defaulted",
+          "choice": "1-cycle latency. The skid register is used only on stall, so the beat goes from input directly to the main register.",
+          "rationale": "This is the minimum latency that meets the full-registration requirement. A fixed 2-stage pipe would add latency with no timing benefit.",
+          "impact": "low",
+          "confidence": "high",
+          "question": "Is one clock cycle of added latency acceptable through the slice?"
+        }
+      ],
+      "depends_on": [
+        "S6"
+      ],
+      "output_section": [
+        "Timing & Pipeline"
+      ],
+      "done_when": [
+        "Waveforms or cycle tables cover back-to-back streaming, a single-cycle downstream stall, a multi-cycle stall, and release.",
+        "A statement shows that throughput returns to 1 beat/clk immediately after the stall releases.",
+        "The critical paths on both sides of the slice are shown to start or end at a flop."
+      ]
+    },
+    {
+      "id": "S8",
+      "title": "Define single-clock operation and AXI-style reset behaviour",
+      "goal": "Specify one clock (aclk) with no CDC. Specify the reset style and polarity, the values of m_tvalid and s_tready during and after reset, and the first cycle s_tready may assert.",
+      "spec_evidence": [
+        {
+          "section": "P1",
+          "quote": "to break timing between the packet engine and the"
+        }
+      ],
+      "decisions": [
+        {
+          "id": "D10",
+          "topic": "Clock domains",
+          "options": [
+            "Single clock domain",
+            "Async CDC slice"
+          ],
+          "status": "defaulted",
+          "choice": "Single clock (aclk) shared by packet engine and egress shaper. No CDC.",
+          "rationale": "The spec describes a timing-closure slice, not a domain crossing.",
+          "impact": "high",
+          "confidence": "high",
+          "question": "Are the packet engine and egress shaper on the same clock (no clock-domain crossing needed in this slice)?"
+        },
+        {
+          "id": "D11",
+          "topic": "Reset style and polarity",
+          "options": [
+            "Synchronous active-low aresetn (AXI convention)",
+            "Asynchronous active-low",
+            "Synchronous active-high"
+          ],
+          "status": "defaulted",
+          "choice": "Synchronous active-low aresetn. During reset, m_tvalid=0 and s_tready=0. s_tready asserts the first cycle after reset deasserts.",
+          "rationale": "This follows the AXI convention. Synchronous reset keeps the control flops simple and avoids reset-recovery timing issues on a timing-critical block.",
+          "impact": "medium",
+          "confidence": "medium",
+          "question": "What reset does your design use: synchronous or asynchronous, and active-low (aresetn) or active-high?"
+        }
+      ],
+      "depends_on": [
+        "S6"
+      ],
+      "output_section": [
+        "Clocking & Reset"
+      ],
+      "done_when": [
+        "The reset table lists the value of every control flop and output during reset.",
+        "The cycle in which s_tready first asserts after reset release is stated.",
+        "The single-clock assumption is stated explicitly."
+      ]
+    },
+    {
+      "id": "S9",
+      "title": "Enumerate stall, bubble and reset corner cases for the skid buffer",
+      "goal": "List the corner cases and the required behaviour for each: simultaneous input and output handshakes while FULL\u2192ONE; m_tready toggling every cycle; upstream tvalid bubbles; tlast on a stalled beat; a beat captured in skid at the same cycle the stall releases; reset asserted mid-packet (in-flight beats dropped); and m_tready asserted with nothing valid.",
+      "spec_evidence": [
+        {
+          "section": "P2",
+          "quote": "must not lose throughput, 1 beat per clock when nobody stalls"
+        },
+        {
+          "section": "P2",
+          "quote": "data is 64 bit, with tkeep and tlast. maybe tuser later"
+        }
+      ],
+      "decisions": [],
+      "depends_on": [
+        "S6",
+        "S7",
+        "S8"
+      ],
+      "output_section": [
+        "Corner Cases & Error Handling"
+      ],
+      "done_when": [
+        "Each corner case has expected behaviour stated in terms of the state transitions.",
+        "Ordering is stated to be preserved in every case, with no beat duplicated or dropped.",
+        "Behaviour on mid-packet reset is documented (no error signalling; the block has no error outputs)."
+      ]
+    },
+    {
+      "id": "S10",
+      "title": "Plan verification for ordering, throughput, protocol compliance and no comb paths",
+      "goal": "Define the verification plan. Use a randomized stream testbench with random upstream valid and downstream ready, plus a scoreboard comparing tdata/tkeep/tlast/tuser in order. Add SVA covering AXI-S stability, no data loss and s_tready being registered. Add a throughput check showing 100% beats/clk when both sides are always ready, a structural or lint check for no comb input\u2192output path, and parameter sweeps (e.g., 8, 64, 512 bits; tuser on and off).",
+      "spec_evidence": [
+        {
+          "section": "P2",
+          "quote": "must register everything in both directions, no comb path in -> out"
+        },
+        {
+          "section": "P2",
+          "quote": "must not lose throughput, 1 beat per clock when nobody stalls"
+        },
+        {
+          "section": "P2",
+          "quote": "should be reusable so make the width a parameter"
+        }
+      ],
+      "decisions": [],
+      "depends_on": [
+        "S9"
+      ],
+      "output_section": [
+        "Verification Plan"
+      ],
+      "done_when": [
+        "The scoreboard and stimulus profiles are listed (full-rate, random stalls, random bubbles, alternating ready).",
+        "Assertions are listed: payload stable while m_tvalid & !m_tready; m_tvalid not dropped without a handshake; no overflow when s_tready=0.",
+        "A throughput measurement criterion is given (N beats in N+1 cycles with no stalls).",
+        "Coverage points are listed: all occupancy states and transitions, tlast in skid, reset during traffic.",
+        "The method for proving no combinational in\u2192out path is specified (timing report or formal/lint)."
+      ]
+    },
+    {
+      "id": "S11",
+      "title": "Record defaulted choices and open questions for the spec author",
+      "goal": "Collect every defaulted decision (architecture, tuser handling, sidebands, reset style, clocking, payload reset, modes, latency) into the Assumptions & Open Questions section, each with its question. Note that 'keep it small' was interpreted as 2 payload registers and no extra modes.",
+      "spec_evidence": [
+        {
+          "section": "P3",
+          "quote": "that's it, keep it small."
+        },
+        {
+          "section": "P2",
+          "quote": "data is 64 bit, with tkeep and tlast. maybe tuser later"
+        }
+      ],
+      "decisions": [],
+      "depends_on": [
+        "S2",
+        "S3",
+        "S5",
+        "S7",
+        "S8"
+      ],
+      "output_section": [
+        "Assumptions & Open Questions"
+      ],
+      "done_when": [
+        "Every defaulted decision (D1-D3, D5-D7, D9-D11) appears with its chosen default and its question.",
+        "The area estimate (flop count as a function of DATA_WIDTH/USER_WIDTH) is stated as an assumption to confirm against 'keep it small'."
+      ]
+    }
+  ],
+  "assumptions": [
+    {
+      "decision_id": "D1",
+      "topic": "Slice architecture that registers both forward and backward paths at full throughput",
+      "assumed": "Two-register skid buffer: a main register drives m_axis_* outputs, and a single skid register catches the in-flight beat when downstream stalls. s_tready is driven from a flop.",
+      "impact": "high",
+      "confidence": "high",
+      "question": "Is a standard 2-entry skid-buffer register slice (2x data storage, 1-cycle latency) acceptable, or do you need a different structure?"
+    },
+    {
+      "decision_id": "D2",
+      "topic": "tuser support",
+      "assumed": "Include s/m_axis_tuser ports sized by USER_WIDTH, with a USER_EN parameter (default 0). When disabled, the tuser storage is not generated and the output is tied to 0.",
+      "impact": "medium",
+      "confidence": "medium",
+      "question": "Should tuser be included now as an optional parameterized port (disabled by default), or left out until it is actually needed?"
+    },
+    {
+      "decision_id": "D3",
+      "topic": "Other AXI-Stream sideband signals (tstrb, tid, tdest, twakeup)",
+      "assumed": "Omit tstrb/tid/tdest. Only tdata, tkeep, tlast and the optional tuser are carried.",
+      "impact": "low",
+      "confidence": "high",
+      "question": "Do you need tid, tdest or tstrb passed through, or only tdata/tkeep/tlast(/tuser)?"
+    },
+    {
+      "decision_id": "D5",
+      "topic": "tkeep width derivation and DATA_WIDTH constraint",
+      "assumed": "KEEP_WIDTH = DATA_WIDTH/8 as a localparam, with an elaboration-time check that DATA_WIDTH % 8 == 0.",
+      "impact": "low",
+      "confidence": "high",
+      "question": "Is it fine to require DATA_WIDTH to be a multiple of 8, with tkeep width derived automatically as DATA_WIDTH/8?"
+    },
+    {
+      "decision_id": "D6",
+      "topic": "Configurable slice modes (bypass / forward-only / backward-only)",
+      "assumed": "Single fixed fully-registered mode with no mode parameter.",
+      "impact": "low",
+      "confidence": "medium",
+      "question": "Do you want a parameter to select bypass, forward-only or backward-only modes for reuse elsewhere, or only the fully registered mode?"
+    },
+    {
+      "decision_id": "D7",
+      "topic": "Payload register reset policy",
+      "assumed": "Only the control flops (m_tvalid, skid_valid, s_tready) are reset. Payload registers have no reset.",
+      "impact": "low",
+      "confidence": "medium",
+      "question": "Is it acceptable that the data/tkeep/tlast registers are not reset (only valid/ready flops are), or does your flow require all flops to be reset?"
+    },
+    {
+      "decision_id": "D9",
+      "topic": "Forward latency",
+      "assumed": "1-cycle latency. The skid register is used only on stall, so the beat goes from input directly to the main register.",
+      "impact": "low",
+      "confidence": "high",
+      "question": "Is one clock cycle of added latency acceptable through the slice?"
+    },
+    {
+      "decision_id": "D10",
+      "topic": "Clock domains",
+      "assumed": "Single clock (aclk) shared by packet engine and egress shaper. No CDC.",
+      "impact": "high",
+      "confidence": "high",
+      "question": "Are the packet engine and egress shaper on the same clock (no clock-domain crossing needed in this slice)?"
+    },
+    {
+      "decision_id": "D11",
+      "topic": "Reset style and polarity",
+      "assumed": "Synchronous active-low aresetn. During reset, m_tvalid=0 and s_tready=0. s_tready asserts the first cycle after reset deasserts.",
+      "impact": "medium",
+      "confidence": "medium",
+      "question": "What reset does your design use: synchronous or asynchronous, and active-low (aresetn) or active-high?"
+    }
+  ]
+}

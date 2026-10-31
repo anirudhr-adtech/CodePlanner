@@ -1,0 +1,662 @@
+{
+  "steps": [
+    {
+      "id": "S1",
+      "title": "Fix cache geometry, address split and write-back/write-allocate policy for the 4 KiB direct-mapped Kestrel D-cache",
+      "goal": "Write the overview: 4 KiB, 32-byte lines, 128 lines. Show the 32-bit byte-address split into tag[31:12] (20 bits), index[11:5] (7 bits), word[4:2] and byte[1:0]. Record write-back with write-allocate and the bus-sharing reason for it. State that every CPU-port access is cacheable and that no maintenance ops exist in this version. Define the parameters and mark which are fixed by the spec and which may be generalised.",
+      "spec_evidence": [
+        {
+          "section": "P3",
+          "quote": "direct-mapped, 4 KiB, 32-byte"
+        },
+        {
+          "section": "P3",
+          "quote": "The core is a 32-bit in-order pipeline with byte-addressed, 32-bit-wide loads and"
+        },
+        {
+          "section": "P3",
+          "quote": "it uses byte strobes for sub-word stores. Policy is write-back with"
+        },
+        {
+          "section": "P3",
+          "quote": "We looked at write-through, but the bus is shared with the DMA and the"
+        }
+      ],
+      "decisions": [
+        {
+          "id": "D1",
+          "topic": "Write policy",
+          "options": [
+            "write-back + write-allocate",
+            "write-through + no-allocate"
+          ],
+          "status": "decided",
+          "choice": "Write-back with write-allocate. A store miss always refills the line before merging.",
+          "rationale": "P3 states this explicitly. The bus also forces it: the write-data channel has no byte strobes and only full-line bursts exist.",
+          "impact": "high",
+          "confidence": "high",
+          "question": ""
+        }
+      ],
+      "depends_on": [],
+      "output_section": [
+        "Overview",
+        "Parameters"
+      ],
+      "done_when": [
+        "Address split table gives tag/index/word/byte bit ranges, and the ranges sum to 32 bits",
+        "Parameter table lists ADDR_W, CACHE_BYTES and LINE_BYTES, plus derived NUM_LINES=128, WORDS_PER_LINE=8 and TAG_W=20, and marks which are fixed",
+        "Overview states the direct-mapped, write-back and write-allocate policy and why write-through was rejected",
+        "Overview states that all CPU-port accesses are cacheable and that no flush/invalidate exists in this version"
+      ]
+    },
+    {
+      "id": "S2",
+      "title": "Define the CPU request/response port and the interconnect burst port signal by signal",
+      "goal": "Specify both external interfaces with widths, directions and handshake rules.\n- CPU side: req valid/ready carrying addr, we, wdata and wstrb; a single resp_valid with rdata; responses in order with no ID; no uncached bit.\n- Bus side: request channel (line-aligned addr, rw, valid/ready); write-data channel (valid/ready/last, no strobes); read-data channel (valid/last, no ready); write-done pulse.\n- Protocol consequences: no error signalling, read data must always be sunk, no partial-line writes.\n- There is no maintenance sideband port.",
+      "spec_evidence": [
+        {
+          "section": "P4",
+          "quote": "On the CPU side, the core issues one request at a time using a valid/ready handshake"
+        },
+        {
+          "section": "P4",
+          "quote": "(address, read/write, write data, byte strobes)"
+        },
+        {
+          "section": "P4",
+          "quote": "per hit. Responses come back in order on a single response-valid strobe. The core always"
+        },
+        {
+          "section": "P4",
+          "quote": "waits for each response, so you don't need an ID."
+        },
+        {
+          "section": "P5",
+          "quote": "channel (line-aligned address, read/write) with valid/ready, a write-data channel with"
+        },
+        {
+          "section": "P5",
+          "quote": "valid/ready/last, a read-data channel with valid/last (the cache must always accept read"
+        },
+        {
+          "section": "P5",
+          "quote": "data, so there's no ready), and a write-done pulse when a write burst is committed. Bursts"
+        },
+        {
+          "section": "P5",
+          "quote": "are always one full line, 8 beats of 32 bits, in incrementing order starting at word 0."
+        }
+      ],
+      "decisions": [],
+      "depends_on": [
+        "S1"
+      ],
+      "output_section": [
+        "Interface"
+      ],
+      "done_when": [
+        "Every port is listed in a table with name, direction, width and description",
+        "Handshake rules are stated: a transfer occurs on valid&&ready, and the payload is held stable while valid&&!ready",
+        "Rules state that bus read data is accepted unconditionally on every valid beat and that write-done is a single-cycle pulse",
+        "Interface notes record that the write-data channel has no strobes and the bus has no error response",
+        "Interface notes record whether wstrb is ignored on loads",
+        "The interface table has no uncached or maintenance signals, and a note explains why"
+      ]
+    },
+    {
+      "id": "S3",
+      "title": "Lay out storage: data SRAM, tag SRAM, valid/dirty flop arrays and victim line buffer",
+      "goal": "Map the 4 KiB of data and the 128 tags onto single-port, 1-cycle synchronous SRAMs with byte enables. Keep valid and dirty in flops so that reset clears them in one cycle. Size the victim line buffer needed for evictions. Draw the top-level block diagram connecting the arrays, the lookup stage, the miss FSM and the two ports.",
+      "spec_evidence": [
+        {
+          "section": "P6",
+          "quote": "The physical design team says we get single-port synchronous SRAMs with 1-cycle read"
+        },
+        {
+          "section": "P6",
+          "quote": "latency and byte-write enables. They would rather keep valid/dirty out of SRAM so a reset"
+        },
+        {
+          "section": "P6",
+          "quote": "doesn't take 128 cycles."
+        }
+      ],
+      "decisions": [
+        {
+          "id": "D2",
+          "topic": "Data SRAM organisation",
+          "options": [
+            "1024x32 word-wide single-port SRAM with 4 byte enables",
+            "128x256 line-wide SRAM with 32 byte enables",
+            "8 banks of 128x32"
+          ],
+          "status": "defaulted",
+          "choice": "One 1024x32 single-port data SRAM addressed by {index,word} with 4 byte-write enables, plus a separate 128x20 single-port tag SRAM.",
+          "rationale": "This matches both the 32-bit CPU access and the 32-bit bus beat. Refill writes and writeback reads move one word per cycle with no wide muxing, and the byte enables serve store strobes directly.",
+          "impact": "medium",
+          "confidence": "high",
+          "question": "Is a single 1024x32 data SRAM plus a 128x20 tag SRAM an acceptable macro configuration, or does physical design need specific SRAM shapes or banking?"
+        },
+        {
+          "id": "D3",
+          "topic": "Location of valid/dirty state",
+          "options": [
+            "128-entry valid and dirty flop arrays",
+            "valid/dirty bits in tag SRAM"
+          ],
+          "status": "decided",
+          "choice": "Valid and dirty live in two 128-bit flop arrays that reset clears. The tag SRAM is not initialised.",
+          "rationale": "P6 asks to keep valid/dirty out of SRAM so that reset does not take 128 cycles.",
+          "impact": "medium",
+          "confidence": "high",
+          "question": ""
+        }
+      ],
+      "depends_on": [
+        "S1"
+      ],
+      "output_section": [
+        "Block Diagram",
+        "Datapath",
+        "Parameters"
+      ],
+      "done_when": [
+        "Block diagram shows the CPU port, lookup/compare stage, data SRAM, tag SRAM, valid/dirty flops, victim buffer, miss FSM and bus port, with no maintenance or uncached path",
+        "Each array has its depth, width, port type and address source listed",
+        "The read and write uses of each SRAM port are enumerated per operation: load hit, store hit, refill and writeback"
+      ]
+    },
+    {
+      "id": "S4",
+      "title": "Design the 1-cycle load-hit pipeline that accepts a request every cycle",
+      "goal": "Define the two-stage flow. In the accept cycle, the CPU address drives the tag and data SRAM reads. In the next cycle, the tag compare and valid check produce resp_valid and rdata. Work out how req_ready is generated so back-to-back read hits run at full rate without a combinational path from SRAM output to ready. Define what happens to a younger request that was already accepted when the older one misses.",
+      "spec_evidence": [
+        {
+          "section": "P4",
+          "quote": "(address, read/write, write data, byte strobes). We'd like hits to return data the cycle"
+        },
+        {
+          "section": "P4",
+          "quote": "after the request is accepted, with a new request accepted every cycle for back-to-back"
+        },
+        {
+          "section": "P4",
+          "quote": "On the CPU side, the core issues one request at a time using a valid/ready handshake"
+        }
+      ],
+      "decisions": [
+        {
+          "id": "D4",
+          "topic": "req_ready generation under back-to-back loads",
+          "options": [
+            "Speculatively accept the next request; on a miss in stage 1, hold it in a replay register and re-read the SRAMs after the miss",
+            "Gate req_ready combinationally on the stage-1 hit result"
+          ],
+          "status": "defaulted",
+          "choice": "Speculative accept with a one-entry replay holding register. req_ready depends only on registered state (FSM idle, stage-1 not a store), never on the tag compare.",
+          "rationale": "This keeps the SRAM-to-compare-to-ready-to-core path off the critical path while still giving full-rate read hits. At most one younger request can be in flight.",
+          "impact": "medium",
+          "confidence": "medium",
+          "question": "While a load's hit/miss is being resolved, may the cache already have accepted the next request (and replay it later), or must req_ready only rise once the previous access is known to hit?"
+        }
+      ],
+      "depends_on": [
+        "S2",
+        "S3"
+      ],
+      "output_section": [
+        "Datapath",
+        "Control Logic",
+        "Timing & Pipeline"
+      ],
+      "done_when": [
+        "Stage diagram shows what happens in the accept cycle and in the response cycle of a load hit",
+        "The req_ready equation uses only registered signals",
+        "The replay path is defined: the younger request is held, and its SRAM read is redone after the miss completes",
+        "A waveform shows 4 back-to-back load hits with one response per cycle"
+      ]
+    },
+    {
+      "id": "S5",
+      "title": "Design the store-hit path within the 2-cycle budget on single-port SRAM",
+      "goal": "A store needs the tag compare (from an SRAM read) before its byte-enabled data write, and the data SRAM has only one port. Define:\n- when the write happens,\n- how the next request is held off,\n- when the store response is returned,\n- when the dirty bit is set.\nShow that loads following stores see the correct data.",
+      "spec_evidence": [
+        {
+          "section": "P4",
+          "quote": "read hits. Stores can be slower if it helps, but please don't make them more than 2 cycles"
+        },
+        {
+          "section": "P3",
+          "quote": "it uses byte strobes for sub-word stores. Policy is write-back with"
+        },
+        {
+          "section": "P6",
+          "quote": "latency and byte-write enables. They would rather keep valid/dirty out of SRAM so a reset"
+        }
+      ],
+      "decisions": [
+        {
+          "id": "D5",
+          "topic": "Store hit implementation",
+          "options": [
+            "2-cycle store: read tag in cycle 1, compare and byte-write data SRAM in cycle 2, req_ready low for that cycle",
+            "Store buffer: write deferred into a free SRAM cycle, with load forwarding"
+          ],
+          "status": "defaulted",
+          "choice": "2-cycle store with no store buffer. The data SRAM byte-write happens in the compare cycle, and the response is issued in that same cycle. req_ready is deasserted during that cycle, so stores sustain one every 2 cycles.",
+          "rationale": "This meets the stated limit of 2 cycles per store hit. It avoids a store buffer and its forwarding and hazard logic.",
+          "impact": "medium",
+          "confidence": "high",
+          "question": "Is a store-hit throughput of one store every 2 cycles (no store buffer) acceptable, or should back-to-back stores sustain one per cycle?"
+        }
+      ],
+      "depends_on": [
+        "S4"
+      ],
+      "output_section": [
+        "Datapath",
+        "Control Logic",
+        "Timing & Pipeline"
+      ],
+      "done_when": [
+        "A cycle-by-cycle table for a store hit gives SRAM port use, the dirty-bit update and response timing",
+        "Waveforms cover store\u2192load to the same word and load\u2192store\u2192load",
+        "Data SRAM byte enables are derived from wstrb only on a store hit"
+      ]
+    },
+    {
+      "id": "S6",
+      "title": "Design the miss engine: dirty-victim writeback, full-line refill and store-miss allocate",
+      "goal": "Define the miss/refill FSM for a blocking cache. On a miss it must:\n- if the victim is dirty, read its 8 words out of the data SRAM (1-cycle latency) and burst them on the write channel under ready backpressure;\n- issue the line read;\n- write the 8 incoming beats into the data SRAM unconditionally;\n- update the tag, valid and dirty state;\n- complete the original load or store.\nDecide the ordering between the writeback burst, write-done and the refill read.",
+      "spec_evidence": [
+        {
+          "section": "P5",
+          "quote": "are always one full line, 8 beats of 32 bits, in incrementing order starting at word 0."
+        },
+        {
+          "section": "P5",
+          "quote": "valid/ready/last, a read-data channel with valid/last (the cache must always accept read"
+        },
+        {
+          "section": "P5",
+          "quote": "data, so there's no ready), and a write-done pulse when a write burst is committed. Bursts"
+        },
+        {
+          "section": "P5",
+          "quote": "Read latency on the interconnect is variable, typically 10\u201320 cycles."
+        },
+        {
+          "section": "P7",
+          "quote": "for MMIO, and whether to do critical-word-first. Make a call and tell us what you assumed."
+        }
+      ],
+      "decisions": [
+        {
+          "id": "D6",
+          "topic": "Dirty eviction structure and ordering vs. refill",
+          "options": [
+            "Copy victim into an 8x32 victim buffer, then issue the refill read and drain the writeback in parallel",
+            "Serial: write back the victim, wait for write-done, then issue the refill read",
+            "Read the victim directly from the SRAM into the write channel with a skid register"
+          ],
+          "status": "defaulted",
+          "choice": "8-word victim buffer. Copy the victim out of the SRAM (8 cycles), issue the refill read request, and send the writeback burst from the buffer in parallel. Any later miss that needs the victim buffer, or that reads the victim's line address, waits for write-done of the outstanding writeback.",
+          "rationale": "This takes the writeback off the critical refill path on a 10\u201320 cycle bus. Using write-done as the commit point preserves read-after-write ordering on the shared interconnect without assuming the channels are ordered.",
+          "impact": "medium",
+          "confidence": "medium",
+          "question": "Does the interconnect guarantee that a read issued after a write burst to the same line returns the new data, or must the cache wait for write-done before reading it back? Is a parallel writeback and refill with an 8-word victim buffer acceptable?"
+        },
+        {
+          "id": "D7",
+          "topic": "Store-miss handling",
+          "options": [
+            "Refill the line, then replay the store through the normal store-hit path",
+            "Merge store bytes into the matching refill beat as it is written"
+          ],
+          "status": "defaulted",
+          "choice": "Refill the whole line, then replay the original request (load or store) through the lookup pipeline. The response comes from the replayed hit.",
+          "rationale": "This reuses the hit datapath and keeps a single response source. The cost is 1\u20132 extra cycles per miss.",
+          "impact": "low",
+          "confidence": "medium",
+          "question": "Is it acceptable for a miss to complete by replaying the access as a hit after the refill (1\u20132 extra cycles), rather than forwarding or merging data during the refill?"
+        },
+        {
+          "id": "D8",
+          "topic": "Critical-word-first / early restart",
+          "options": [
+            "None: respond after the full line is refilled",
+            "Early restart: forward the requested word as its beat arrives (bus order is fixed from word 0)",
+            "Critical-word-first (not possible: bursts always start at word 0)"
+          ],
+          "status": "defaulted",
+          "choice": "No critical-word-first, because the bus cannot reorder beats, and no early restart. The response is returned after all 8 beats are written and the access is replayed.",
+          "rationale": "P5 fixes burst order starting at word 0, so true CWF would need interconnect changes. Early restart adds forwarding and hazard logic that a first cut does not need.",
+          "impact": "low",
+          "confidence": "medium",
+          "question": "Since bursts always start at word 0, critical-word-first is not possible. Do you want early restart (return the requested word as soon as its beat arrives), or is waiting for the full line acceptable for the first cut?"
+        }
+      ],
+      "depends_on": [
+        "S3",
+        "S4",
+        "S5"
+      ],
+      "output_section": [
+        "Control Logic",
+        "Datapath",
+        "Timing & Pipeline",
+        "Block Diagram"
+      ],
+      "done_when": [
+        "The FSM diagram shows every state, every transition condition, and the SRAM and bus usage in each state",
+        "No state can drop a read-data beat: the data SRAM is guaranteed free whenever rd_valid can occur",
+        "The writeback read path handles the 1-cycle SRAM latency and wr_ready backpressure without losing or duplicating a beat",
+        "Tag, valid and dirty updates are specified for a clean miss, a dirty miss and a store miss",
+        "A miss latency formula is given for clean and dirty misses as a function of bus read latency"
+      ]
+    },
+    {
+      "id": "S7",
+      "title": "Document the agreed scope: no uncached/MMIO path and no cache maintenance in this version",
+      "goal": "Record the user-confirmed answers to the P7 open items. The cache has no uncached path; the core or a wrapper must decode MMIO and route it around the cache. The cache has no flush or invalidate of any kind. State the architectural consequences:\n- an MMIO-addressed request reaching the cache is cached like any other;\n- DMA coherence is not maintained by the cache, so dirty data reaches memory only on natural eviction.\nList the proposed follow-ups as non-implemented hooks: a flush_req/inv_req sideband walking 128 indices, and a cpu_req_uncached bit with single-beat bus transactions. Note which structures already make them cheap, such as the flop-based valid/dirty and the reusable writeback path.",
+      "spec_evidence": [
+        {
+          "section": "P7",
+          "quote": "Things we haven't decided yet: cache maintenance ops (flush/invalidate), uncached regions"
+        },
+        {
+          "section": "P7",
+          "quote": "for MMIO, and whether to do critical-word-first. Make a call and tell us what you assumed."
+        },
+        {
+          "section": "P3",
+          "quote": "We looked at write-through, but the bus is shared with the DMA and the"
+        }
+      ],
+      "decisions": [
+        {
+          "id": "D9",
+          "topic": "Uncached / MMIO support",
+          "options": [
+            "No uncached path: all accesses through this port are cacheable, and MMIO is routed around the cache by the core/SoC",
+            "Parameterised uncached address window using full-line bursts",
+            "Add a separate single-beat uncached bus port"
+          ],
+          "status": "decided",
+          "choice": "No uncached path. Every CPU-port request is cached, and the core or a wrapper must decode MMIO ranges and route them around the cache. A cpu_req_uncached bit with single-beat transactions is only a possible future option and would need an interconnect protocol extension.",
+          "rationale": "Settled by the user's answer to Q1.",
+          "impact": "high",
+          "confidence": "high",
+          "question": ""
+        },
+        {
+          "id": "D10",
+          "topic": "Cache maintenance operations",
+          "options": [
+            "Sideband maintenance port with whole-cache clean+invalidate (flush) and invalidate-all",
+            "Per-address clean/invalidate encoded as extra CPU request types",
+            "No maintenance ops"
+          ],
+          "status": "decided",
+          "choice": "No maintenance ops and no invalidate path in this version. A flush_req/inv_req sideband walking all 128 indices is only a proposed follow-up.",
+          "rationale": "Settled by the user's answer to Q2.",
+          "impact": "medium",
+          "confidence": "high",
+          "question": ""
+        }
+      ],
+      "depends_on": [
+        "S2",
+        "S6"
+      ],
+      "output_section": [
+        "Interface",
+        "Control Logic",
+        "Assumptions & Open Questions"
+      ],
+      "done_when": [
+        "The MA states explicitly that an access to an MMIO address that reaches the cache is treated as cacheable, and that the integrator is responsible for routing MMIO around the cache",
+        "The MA states that there are no flush/invalidate ports and that valid/dirty can be cleared only by reset",
+        "DMA coherence limitations are stated: DMA may read stale memory for dirty lines, and DMA writes are not visible to cached lines",
+        "The future flush/inv sideband and uncached-bit extensions are described as not implemented, and the MA identifies the structures (valid/dirty flops, writeback path, FSM idle state) that would accommodate them"
+      ]
+    },
+    {
+      "id": "S8",
+      "title": "Consolidate cycle-level timing for every access class",
+      "goal": "Write the timing chapter: latency and throughput for load hit, store hit, clean miss, dirty miss and back-to-back mixes. Include waveforms of both ports so the CPU-side guarantees in P4 and the bus-side behaviour in P5 can be checked against the design.",
+      "spec_evidence": [
+        {
+          "section": "P4",
+          "quote": "after the request is accepted, with a new request accepted every cycle for back-to-back"
+        },
+        {
+          "section": "P4",
+          "quote": "read hits. Stores can be slower if it helps, but please don't make them more than 2 cycles"
+        },
+        {
+          "section": "P5",
+          "quote": "Read latency on the interconnect is variable, typically 10\u201320 cycles."
+        }
+      ],
+      "decisions": [],
+      "depends_on": [
+        "S4",
+        "S5",
+        "S6"
+      ],
+      "output_section": [
+        "Timing & Pipeline"
+      ],
+      "done_when": [
+        "The latency/throughput table covers load hit (1/1), store hit (1/2), clean miss, dirty miss, and a miss that must wait for an earlier write-done",
+        "Waveforms are given for a load-hit stream, a store-hit stream, a load miss with a dirty victim, and a miss with a speculatively accepted younger request",
+        "The critical combinational path (SRAM output \u2192 tag compare \u2192 resp mux) is identified, and req_ready is shown to be off it"
+      ]
+    },
+    {
+      "id": "S9",
+      "title": "Specify the single clock domain and reset behaviour of flop state vs. SRAM contents",
+      "goal": "Document the one clock shared by the core, the cache and the interconnect. Define the reset style and which state is reset: valid/dirty arrays, FSM, handshake outputs, victim buffer and replay register. Make sure the tag and data SRAMs need no initialisation, as the PD team asked. Note that reset is the only way to invalidate the cache in this version.",
+      "spec_evidence": [
+        {
+          "section": "P6",
+          "quote": "latency and byte-write enables. They would rather keep valid/dirty out of SRAM so a reset"
+        },
+        {
+          "section": "P6",
+          "quote": "doesn't take 128 cycles."
+        }
+      ],
+      "decisions": [
+        {
+          "id": "D11",
+          "topic": "Clocking and reset style",
+          "options": [
+            "Single clock, synchronous active-low reset",
+            "Single clock, asynchronous-assert/synchronous-deassert reset",
+            "Separate core and bus clocks with CDC"
+          ],
+          "status": "defaulted",
+          "choice": "The cache, core and interconnect share a single clock. Reset is active-low, asserted asynchronously and deasserted synchronously. The valid/dirty arrays and all control and handshake flops are reset; SRAM contents and datapath registers are not.",
+          "rationale": "The spec mentions no second clock. Async-assert/sync-deassert is common practice for microcontroller blocks, and it keeps reset to one cycle as P6 wants.",
+          "impact": "medium",
+          "confidence": "medium",
+          "question": "Do the core and the system interconnect run on the same clock as the D-cache? What reset convention (sync/async, polarity) does Kestrel use?"
+        }
+      ],
+      "depends_on": [
+        "S3"
+      ],
+      "output_section": [
+        "Clocking & Reset"
+      ],
+      "done_when": [
+        "The clock and reset ports are defined, with reset polarity and synchronisation",
+        "A table lists every stateful element and whether it is reset, and to what value",
+        "The MA states that no handshake output (req_ready, resp_valid, bus valids) is asserted during reset or in the cycle after it",
+        "The MA notes that reset discards dirty data without writeback, because no flush exists"
+      ]
+    },
+    {
+      "id": "S10",
+      "title": "Enumerate corner cases specific to this blocking write-back cache",
+      "goal": "List and resolve the hazardous scenarios and their required behaviour:\n- a miss to the same index as the line being evicted;\n- a re-miss to the just-evicted address before write-done;\n- a store with all strobes zero;\n- a load immediately after a store to the same word;\n- a younger accepted request when the older one misses;\n- back-to-back rd_valid beats with no gaps;\n- wr_ready held low mid-burst;\n- a stray rd_valid or write-done with nothing outstanding;\n- misaligned addresses;\n- an MMIO address arriving at the cache despite the routing assumption.",
+      "spec_evidence": [
+        {
+          "section": "P5",
+          "quote": "valid/ready/last, a read-data channel with valid/last (the cache must always accept read"
+        },
+        {
+          "section": "P5",
+          "quote": "data, so there's no ready), and a write-done pulse when a write burst is committed. Bursts"
+        },
+        {
+          "section": "P4",
+          "quote": "per hit. Responses come back in order on a single response-valid strobe. The core always"
+        }
+      ],
+      "decisions": [],
+      "depends_on": [
+        "S6",
+        "S7"
+      ],
+      "output_section": [
+        "Corner Cases & Error Handling"
+      ],
+      "done_when": [
+        "Each corner case has its trigger, its required behaviour and the mechanism that guarantees it",
+        "The MA states that there is no bus error handling, because the protocol has none",
+        "The MA lists the assumed core behaviour for misaligned accesses",
+        "Protocol violations from the bus (unexpected rd_valid or write-done) are given a defined behaviour: ignore or assertion",
+        "A misrouted MMIO access is documented as cached normally, and an optional simulation-only assertion hook on a configurable MMIO range is described"
+      ]
+    },
+    {
+      "id": "S11",
+      "title": "Plan verification against a reference memory model with a randomised interconnect",
+      "goal": "Define the testbench:\n- a scoreboard comparing every load response against a flat golden memory;\n- a bus model with randomised read latency (including under 10 and over 20 cycles) and random wr_ready backpressure;\n- directed tests for each corner case in S10.\nAdd assertions for both handshake protocols and coverage of hit/miss/dirty combinations. Check memory consistency at end of test by comparing golden memory against bus memory merged with the cache's dirty lines, since no flush exists.",
+      "spec_evidence": [
+        {
+          "section": "P5",
+          "quote": "Read latency on the interconnect is variable, typically 10\u201320 cycles."
+        },
+        {
+          "section": "P4",
+          "quote": "after the request is accepted, with a new request accepted every cycle for back-to-back"
+        }
+      ],
+      "decisions": [],
+      "depends_on": [
+        "S8",
+        "S10"
+      ],
+      "output_section": [
+        "Verification Plan"
+      ],
+      "done_when": [
+        "Testbench components are listed: CPU driver, bus responder, golden memory, scoreboard, and a backdoor reader of cache state for end-of-test checks",
+        "The directed test list maps one-to-one to the S10 corner cases, plus performance checks for the 1-cycle load hit and the 2-cycle store hit",
+        "Assertions are listed for valid/ready stability, exactly 8 beats with last on beat 8, line-aligned bus addresses, and one response per accepted request",
+        "Coverage points include index aliasing, dirty evictions, each strobe pattern, eviction under wr_ready backpressure, and replay of a speculatively accepted request"
+      ]
+    },
+    {
+      "id": "S12",
+      "title": "Record assumptions and open questions for the Arch team",
+      "goal": "Collect every defaulted decision (D2, D4\u2013D8, D11) and every implicit assumption into one list that Arch can sign off. Implicit assumptions include: the core never issues misaligned accesses; DMA traffic is not snooped; MMIO is routed outside the cache. Record the resolved P7 items (no uncached path, no maintenance ops, no critical-word-first) and the proposed follow-ups. Each item states the consequence if the assumption is wrong.",
+      "spec_evidence": [
+        {
+          "section": "P7",
+          "quote": "Things we haven't decided yet: cache maintenance ops (flush/invalidate), uncached regions"
+        },
+        {
+          "section": "P7",
+          "quote": "for MMIO, and whether to do critical-word-first. Make a call and tell us what you assumed."
+        }
+      ],
+      "decisions": [],
+      "depends_on": [
+        "S1",
+        "S2",
+        "S3",
+        "S4",
+        "S5",
+        "S6",
+        "S7",
+        "S8",
+        "S9",
+        "S10",
+        "S11"
+      ],
+      "output_section": [
+        "Assumptions & Open Questions"
+      ],
+      "done_when": [
+        "Every defaulted decision appears with its chosen value and its question to Arch",
+        "The three P7 items (maintenance, MMIO, critical-word-first) are answered explicitly, with the user-confirmed answers marked as such",
+        "DMA coherence is called out as not provided by this version, and software must avoid sharing cacheable buffers with DMA",
+        "The future extensions (flush_req/inv_req sideband, cpu_req_uncached with a single-beat bus extension) are listed as follow-ups"
+      ]
+    }
+  ],
+  "assumptions": [
+    {
+      "decision_id": "D2",
+      "topic": "Data SRAM organisation",
+      "assumed": "One 1024x32 single-port data SRAM addressed by {index,word} with 4 byte-write enables, plus a separate 128x20 single-port tag SRAM.",
+      "impact": "medium",
+      "confidence": "high",
+      "question": "Is a single 1024x32 data SRAM plus a 128x20 tag SRAM an acceptable macro configuration, or does physical design need specific SRAM shapes or banking?"
+    },
+    {
+      "decision_id": "D4",
+      "topic": "req_ready generation under back-to-back loads",
+      "assumed": "Speculative accept with a one-entry replay holding register. req_ready depends only on registered state (FSM idle, stage-1 not a store), never on the tag compare.",
+      "impact": "medium",
+      "confidence": "medium",
+      "question": "While a load's hit/miss is being resolved, may the cache already have accepted the next request (and replay it later), or must req_ready only rise once the previous access is known to hit?"
+    },
+    {
+      "decision_id": "D5",
+      "topic": "Store hit implementation",
+      "assumed": "2-cycle store with no store buffer. The data SRAM byte-write happens in the compare cycle, and the response is issued in that same cycle. req_ready is deasserted during that cycle, so stores sustain one every 2 cycles.",
+      "impact": "medium",
+      "confidence": "high",
+      "question": "Is a store-hit throughput of one store every 2 cycles (no store buffer) acceptable, or should back-to-back stores sustain one per cycle?"
+    },
+    {
+      "decision_id": "D6",
+      "topic": "Dirty eviction structure and ordering vs. refill",
+      "assumed": "8-word victim buffer. Copy the victim out of the SRAM (8 cycles), issue the refill read request, and send the writeback burst from the buffer in parallel. Any later miss that needs the victim buffer, or that reads the victim's line address, waits for write-done of the outstanding writeback.",
+      "impact": "medium",
+      "confidence": "medium",
+      "question": "Does the interconnect guarantee that a read issued after a write burst to the same line returns the new data, or must the cache wait for write-done before reading it back? Is a parallel writeback and refill with an 8-word victim buffer acceptable?"
+    },
+    {
+      "decision_id": "D7",
+      "topic": "Store-miss handling",
+      "assumed": "Refill the whole line, then replay the original request (load or store) through the lookup pipeline. The response comes from the replayed hit.",
+      "impact": "low",
+      "confidence": "medium",
+      "question": "Is it acceptable for a miss to complete by replaying the access as a hit after the refill (1\u20132 extra cycles), rather than forwarding or merging data during the refill?"
+    },
+    {
+      "decision_id": "D8",
+      "topic": "Critical-word-first / early restart",
+      "assumed": "No critical-word-first, because the bus cannot reorder beats, and no early restart. The response is returned after all 8 beats are written and the access is replayed.",
+      "impact": "low",
+      "confidence": "medium",
+      "question": "Since bursts always start at word 0, critical-word-first is not possible. Do you want early restart (return the requested word as soon as its beat arrives), or is waiting for the full line acceptable for the first cut?"
+    },
+    {
+      "decision_id": "D11",
+      "topic": "Clocking and reset style",
+      "assumed": "The cache, core and interconnect share a single clock. Reset is active-low, asserted asynchronously and deasserted synchronously. The valid/dirty arrays and all control and handshake flops are reset; SRAM contents and datapath registers are not.",
+      "impact": "medium",
+      "confidence": "medium",
+      "question": "Do the core and the system interconnect run on the same clock as the D-cache? What reset convention (sync/async, polarity) does Kestrel use?"
+    }
+  ]
+}

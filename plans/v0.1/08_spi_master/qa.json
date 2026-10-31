@@ -1,0 +1,16 @@
+[
+  {
+    "id": "Q1",
+    "decision_id": "D7",
+    "question": "After a transfer with CS_HOLD=1, how should software release CS: by clearing CS_HOLD (which immediately de-asserts CS), or only by issuing a final transfer with CS_HOLD=0? And what should happen if the next transfer selects a different CS while one is held?",
+    "in_doc": true,
+    "answer": "Both work. Clearing CS_HOLD while IDLE with CS held de-asserts all CS on the next cycle (cs_held<=0); there is no extra hold/guard phase and BUSY stays low. CS_HOLD is also read live at the end of LAG, so clearing it during the last transfer of a burst releases CS automatically. If a new transfer selects a different CS while one is held, the old CS is released and the new one asserted in the same cycle. No CS-high gap is applied between different devices."
+  },
+  {
+    "id": "Q2",
+    "decision_id": "D11",
+    "question": "If software clears EN in the middle of a transfer, should the transfer abort immediately (CS released, no DONE) or finish the current word first? And should TXDATA writes while EN=0 be ignored?",
+    "in_doc": true,
+    "answer": "No abort. Clearing EN mid-transfer lets the current transfer finish normally, including CS release and DONE, because EN only gates start. TXDATA writes while EN=0 are ignored and set no flag (TX_OVR is not set)."
+  }
+]

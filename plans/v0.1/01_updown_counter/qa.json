@@ -1,0 +1,9 @@
+[
+  {
+    "id": "Q1",
+    "decision_id": "D2",
+    "question": "Must tc come straight from a flop (accepting that it lags a change of 'up' by one cycle), or may it be a decode of the registered count combined with the current 'up' input?",
+    "in_doc": true,
+    "answer": "It may be a combinational decode: tc = (up && count==MAX) || (!up && count==0), built from the registered count and the live up input. No extra flop is needed, and tc follows a change of up immediately. Only count has to be registered. A registered TC_REG option is just a possible future addition if glitch-free tc is ever needed."
+  }
+]

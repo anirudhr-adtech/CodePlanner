@@ -1,0 +1,156 @@
+{
+  "score": {
+    "key_decisions": 15,
+    "matches": 12,
+    "differs": 1,
+    "missing": 2,
+    "spec_silent": 13,
+    "spec_silent_differs": 1,
+    "material_differs": 1,
+    "needless_questions": 1,
+    "coverage": 0.867,
+    "agreement": 0.8,
+    "sound": 0.8
+  },
+  "key_decisions": [
+    {
+      "decision": "Filter structure: transposed vs systolic",
+      "ma_choice": "Symmetric systolic form: per-stage DSP48E2 pre-adder and multiplier, partial sums on the PCIN\u2192PCOUT cascade. A comparison table justifies it on DSP count, fanout and Fmax.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "Systolic symmetric form using pre-adder, ACOUT/ACIN and PCOUT/PCIN cascades, with a comparison table against transposed form.",
+      "difference": "none",
+      "note": "The rationale matches too: transposed form has broadcast fanout and pairs poorly with the pre-adder."
+    },
+    {
+      "decision": "DSP count and stage mapping",
+      "ma_choice": "M = ceil(N/2) DSP48E2 slices per channel, one per unique coefficient, with no fabric adder tree.",
+      "spec_settles_it": true,
+      "in_plan": "matches",
+      "plan_choice": "ceil(N_TAPS/2) DSPs per instance, no fabric adder tree.",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Source of the mirrored (pre-adder partner) sample",
+      "ma_choice": "The forward delay line advances 2 registers per stage, and a single tail sample sr[N-1] is broadcast to every stage's pre-adder D port (fanout M, can be duplicated). This is the one non-cascade net.",
+      "spec_settles_it": false,
+      "in_plan": "missing",
+      "plan_choice": "",
+      "difference": "none",
+      "note": "The plan leaves this open ('e.g. fabric SRL delay line'). It even claims systolic avoids broadcast, but the MA's working structure relies on a fanout-M tail broadcast. This is the key insight behind the symmetric systolic mapping, and the plan does not find it."
+    },
+    {
+      "decision": "Odd-N centre tap",
+      "ma_choice": "The last stage's tail operand is forced to 0, so the cascade stays uniform.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "Centre tap in the last DSP with the D operand held at zero.",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Tap-count configurability",
+      "ma_choice": "N_TAPS is a synthesis generic, 2\u201364, default 16, even or odd.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "Synthesis parameter N_TAPS 2\u201364, default 16 (from Q1).",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Internal precision and widths",
+      "ma_choice": "Full precision: 17-bit pre-add, 35-bit product, ACC_W = 35 + clog2(M) (38 for N=16, 40 for N=64) in the 48-bit P path. Quantised once at the output.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "Full precision Q2.15 / Q3.32, about 40 bits accumulated in the 48-bit P cascade, single quantisation at the output.",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Rounding implementation",
+      "ma_choice": "Round-half-up via an RND bias injected at the cascade head (p_q[0] = RND + m_q[0]), then arithmetic shift.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "Round-half-up by injecting 2^(k-1) into the first DSP (C port or RND).",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Saturation stage",
+      "ma_choice": "Registered fabric output stage: shift, then saturate to \u00b1full scale, plus an out_sat status flag.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "Guard-bit compare in a registered output stage that clamps to 0x7FFF/0x8000.",
+      "difference": "none",
+      "note": "The plan has no out_sat flag; this is a minor interface omission."
+    },
+    {
+      "decision": "Glitch-free coefficient update mechanism",
+      "ma_choice": "Shadow bank plus explicit coef_commit. A stagger chain sw_q[k] applies the new coefficient at stage k exactly k+1 accepted samples after commit, giving a sample-exact switch.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "Shadow registers, explicit commit strobe, and a swap token travelling one stage per partial-sum delay.",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Commit protocol details: busy, writes during commit, commit without ce",
+      "ma_choice": "pend_q remembers a commit that arrives while ce=0 and aligns it to the next accepted sample. coef_busy is exposed; shadow writes while busy are dropped and set a sticky coef_err; back-to-back commits are absorbed.",
+      "spec_settles_it": false,
+      "in_plan": "missing",
+      "plan_choice": "",
+      "difference": "none",
+      "note": "The plan only lists these cases as 'to be specified' and adds no busy or error ports to the interface."
+    },
+    {
+      "decision": "Valid handling",
+      "ma_choice": "in_valid drives a global clock-enable that freezes the whole pipeline, including the stagger chain. out_valid is the registered ce gated by a fill counter. Output equals the FIR of accepted samples.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "Global CE from registered in_valid with replicated CE registers; out_valid tracks the enabled pipeline.",
+      "difference": "none",
+      "note": "The plan adds a registered and replicated CE for fanout. This is an implementation refinement."
+    },
+    {
+      "decision": "Reset scope and start-up behaviour",
+      "ma_choice": "Synchronous reset clears the delay line, DSP pipeline, control logic and both coefficient banks (to 0). The first out_valid sample is y(0) with zero history, i.e. the true start-up transient is emitted.",
+      "spec_settles_it": false,
+      "in_plan": "differs",
+      "plan_choice": "Reset on control only. Datapath and DSP registers are not reset; out_valid stays low until N valid samples fill the filter. Coefficient banks either retain their contents or reset to a documented default (undecided).",
+      "difference": "material",
+      "note": "Visible behaviour differs: the plan suppresses the start-up transient, while the MA emits the zero-state response. Post-reset coefficient state is also left open in the plan."
+    },
+    {
+      "decision": "Constant latency definition",
+      "ma_choice": "L = M + 4 accepted samples (12 clocks, 24.4 ns for N=16), from input reg + AD + M + M cascade stages + output reg.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "Constant latency formula L(N_TAPS) with about N/2 extra cycles, stated in valid samples, evaluated below 100 ns.",
+      "difference": "none",
+      "note": "The plan gives no concrete number but commits to the same structure and units."
+    },
+    {
+      "decision": "Clocking and coefficient-port domain",
+      "ma_choice": "Single clock domain. The coefficient port is synchronous to clk, with the wrapper doing any CDC.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "Write port synchronous to the fabric clock; the wrapper performs CDC.",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Multi-channel organisation",
+      "ma_choice": "32 independent filter instances, no TDM, because the sample rate equals the clock rate.",
+      "spec_settles_it": true,
+      "in_plan": "matches",
+      "plan_choice": "One fully parallel instance per channel, each with its own coefficient bank.",
+      "difference": "none",
+      "note": ""
+    }
+  ],
+  "needless_questions": [
+    "Q2"
+  ],
+  "summary": "The plan matches the MA on the headline call (symmetric systolic over transposed), DSP count, centre-tap handling, full-precision widths, cascade-head rounding bias, staggered shadow-bank commit and CE-based valid handling. It misses the key structural detail of how the pre-adder partner sample is sourced: the MA uses a single broadcast tail sample with a 2-per-stage forward delay line. The plan wrongly implies systolic needs no broadcast and leaves this open. It also leaves the commit busy/error/pending protocol unresolved. It differs materially on reset: control-only reset with masked start-up versus the MA's full reset with zero-state transient output and coefficients reset to zero. Q2 was largely needless, since per-instance banks with wrapper broadcast need no core change."
+}

@@ -1,0 +1,9 @@
+[
+  {
+    "id": "Q1",
+    "decision_id": "D2",
+    "question": "Do you prefer inferred behavioural RTL (portable, mapping checked in synthesis) or a direct DSP48E2 primitive instantiation (guaranteed mapping, Xilinx-only)?",
+    "in_doc": false,
+    "answer": "Use the default: Inference-friendly behavioural RTL written to mirror the DSP48E2 register structure. The verification plan includes a check of the synthesis utilization/mapping report."
+  }
+]

@@ -1,0 +1,145 @@
+{
+  "score": {
+    "key_decisions": 14,
+    "matches": 10,
+    "differs": 2,
+    "missing": 2,
+    "spec_silent": 13,
+    "spec_silent_differs": 2,
+    "material_differs": 1,
+    "needless_questions": 0,
+    "coverage": 0.857,
+    "agreement": 0.714,
+    "sound": 0.786
+  },
+  "key_decisions": [
+    {
+      "decision": "Transfer granularity and misalignment handling",
+      "ma_choice": "Word-aligned only. Bits [1:0] of SRC, DST or LEN nonzero at START gives ERR with code 3; the channel never becomes busy and issues no bus traffic.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "Word-aligned only, ERR_CODE 3, never BUSY, no bus traffic (confirmed via Q1).",
+      "difference": "none",
+      "note": "The spec only says firmware would accept this; Q1 resolved it."
+    },
+    {
+      "decision": "Maximum burst length",
+      "ma_choice": "MAX_BURST is a parameter (power of 2, 1-256) with default 16. It also sets the buffer depth.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "Compile-time MAX_BURST, power of two 1..256, default 16, sizes the buffer and counters.",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Read/write overlap",
+      "ma_choice": "None. Each burst is fully read into the buffer before its write burst starts (~1.64 B/cycle, 41% of peak). A 2xMAX_BURST FIFO is deferred to v2.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "No overlap, store-and-forward, ~41% of peak, v2 2xMAX_BURST FIFO hook (Q2).",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Engine and buffer organization, AXI concurrency",
+      "ma_choice": "One shared transfer engine with a single MAX_BURST x 32 register buffer. One burst in flight at a time, fixed ID 0, constant INCR/size/cache/prot attributes.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "Single shared MAX_BURST-deep buffer owned by the granted channel. One outstanding burst, fixed ARID/AWID, tied-off attributes.",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Arbitration granularity",
+      "ma_choice": "Round-robin over busy & ~err, re-arbitrating after every read+write burst pair. The pointer moves past the winner. Worst-case wait is 3 bursts.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "Round-robin per burst pair, pointer advances past the winner, only BUSY non-error channels eligible, wait bounded by (N-1) burst pairs.",
+      "difference": "none",
+      "note": "The spec requires RR and no hogging but not the granularity."
+    },
+    {
+      "decision": "Burst sizing / 4 KB handling",
+      "ma_choice": "beats = min(remaining words, MAX_BURST, src 4K room, dst 4K room). The same beat count is used for the read and the write, computed in a registered CALC stage.",
+      "spec_settles_it": true,
+      "in_plan": "matches",
+      "plan_choice": "The same min() of four terms, with the same beat count for the read and write burst.",
+      "difference": "none",
+      "note": "Follows directly from the 4 KB rule combined with the shared buffer."
+    },
+    {
+      "decision": "Progress visibility",
+      "ma_choice": "Per-channel read-only REMAIN register updated after each burst. Programmed SRC/DST/LEN keep their values so software can restart.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "Read-only REMAINING register updated after BRESP; SRC/DST/LEN keep their programmed values.",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Stop/abort semantics",
+      "ma_choice": "Graceful at burst granularity. A channel not being serviced is aborted immediately; a channel in flight sets abort_pend and stops at UPDATE. DONE takes priority over ABORTED on the last burst.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "Graceful at the burst boundary: a waiting channel stops immediately, an in-flight channel finishes its burst pair, then ABORTED plus interrupt, no resume.",
+      "difference": "none",
+      "note": "The plan does not state the DONE-vs-ABORT priority but the core semantics match."
+    },
+    {
+      "decision": "AXI error response handling",
+      "ma_choice": "On RRESP error, consume beats to RLAST, skip the write, ERR code 1. On BRESP error, ERR code 2. Pointers are not advanced, only the faulty channel stops, and the arbiter masks err.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "Accept beats through RLAST, skip the write, read/write error codes, latch the faulting address, return to arbitration for the other channels.",
+      "difference": "none",
+      "note": "Stop-only-that-channel is in the spec. Skipping the write and the code split are design choices, and both documents agree on them."
+    },
+    {
+      "decision": "Interrupt structure and clear mechanism",
+      "ma_choice": "Single level dma_irq = |(IRQ_STATUS & IRQ_EN). IRQ_STATUS is a read-only view; the bits are cleared by W1C in per-channel CHn_STATUS (single source of truth).",
+      "spec_settles_it": false,
+      "in_plan": "differs",
+      "plan_choice": "Single active-high level irq from INT_STATUS & INT_ENABLE, with INT_STATUS bits write-1-to-clear directly.",
+      "difference": "equivalent",
+      "note": "Same output structure. Only the location of the W1C clear differs, which affects register semantics slightly."
+    },
+    {
+      "decision": "LEN = 0 handling",
+      "ma_choice": "START with LEN=0 sets DONE immediately with no bus traffic.",
+      "spec_settles_it": false,
+      "in_plan": "missing",
+      "plan_choice": "",
+      "difference": "none",
+      "note": "The plan only lists 'the LEN==0 policy' as something to define and makes no choice."
+    },
+    {
+      "decision": "Address wrap past 0xFFFFFFFF",
+      "ma_choice": "Not checked. It cannot occur within a burst because of the 4 KB clip, and a transfer wraps naturally between bursts.",
+      "spec_settles_it": false,
+      "in_plan": "differs",
+      "plan_choice": "Treated as a START-time config check that maps to an ERR_CODE.",
+      "difference": "material",
+      "note": "Changes visible behaviour: the plan rejects such transfers, while the MA lets them wrap."
+    },
+    {
+      "decision": "Register writes while busy",
+      "ma_choice": "SRC/DST/LEN are read-only while BUSY, START while BUSY is ignored, and the engine uses separate working copies.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "Writes while BUSY are to be specified, with 'ignored' given as the example; working current-src/dst registers are separate.",
+      "difference": "none",
+      "note": "The plan's commitment is weak but points the same way."
+    },
+    {
+      "decision": "Reset style",
+      "ma_choice": "ARESETn is used as a synchronous reset on control flops; the data buffer is not reset.",
+      "spec_settles_it": false,
+      "in_plan": "missing",
+      "plan_choice": "",
+      "difference": "none",
+      "note": "The plan defers the sync vs async choice to the document without deciding."
+    }
+  ],
+  "needless_questions": [],
+  "summary": "The plan closely tracks the reference MA on every major structural choice: word-aligned only with code 3, MAX_BURST=16 as a parameter, no overlap, a shared single buffer with one outstanding burst, per-burst round-robin, the 4-term burst min, a REMAIN register, graceful abort, and read-error write skipping. Remaining gaps are minor. The plan leaves LEN=0 and reset style undecided. It places the interrupt W1C clear in the global register rather than per-channel STATUS. It appears to turn 32-bit address wrap into a config error, whereas the MA lets it wrap unchecked. Both questions asked addressed items the spec explicitly left open, so neither was needless."
+}

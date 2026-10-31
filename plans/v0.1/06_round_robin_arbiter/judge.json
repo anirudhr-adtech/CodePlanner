@@ -1,0 +1,147 @@
+{
+  "score": {
+    "key_decisions": 14,
+    "matches": 10,
+    "differs": 3,
+    "missing": 1,
+    "spec_silent": 13,
+    "spec_silent_differs": 3,
+    "material_differs": 0,
+    "needless_questions": 1,
+    "coverage": 0.929,
+    "agreement": 0.714,
+    "sound": 0.929
+  },
+  "key_decisions": [
+    {
+      "decision": "Grant latency structure",
+      "ma_choice": "gnt is combinational from req plus registered mask_q, owner_q and lock_q. There is no pipeline stage on req->gnt.",
+      "spec_settles_it": true,
+      "in_plan": "matches",
+      "plan_choice": "D1: gnt is combinational in the same cycle from req, lock and registered pointer, owner and counter.",
+      "difference": "none",
+      "note": "R4 mandates this."
+    },
+    {
+      "decision": "Round-robin core structure",
+      "ma_choice": "Registered thermometer mask with masked and unmasked lowest-set-bit selects; the masked result wins if any masked request is present.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "D4: dual masked/unmasked fixed-priority encoders with a registered thermometer mask.",
+      "difference": "none",
+      "note": "Same scheme."
+    },
+    {
+      "decision": "Find-first-set implementation",
+      "ma_choice": "x & (~x+1) using a carry-lookahead increment as the baseline. A Kogge-Stone prefix-OR is the fallback if timing fails.",
+      "spec_settles_it": false,
+      "in_plan": "differs",
+      "plan_choice": "A log-depth prefix-OR find-first from the start.",
+      "difference": "equivalent",
+      "note": "The plan starts from the MA's fallback option. The architecture is unchanged."
+    },
+    {
+      "decision": "Mask/pointer update policy",
+      "ma_choice": "The mask moves past the winner only on a fresh arbitration. It is held during locked continuation and when no request is present.",
+      "spec_settles_it": false,
+      "in_plan": "differs",
+      "plan_choice": "D5: the pointer updates to the granted index on every grant, including continuations, and holds when idle.",
+      "difference": "equivalent",
+      "note": "During a continuation the granted index equals the owner, which the mask already points past, so the resulting state is identical."
+    },
+    {
+      "decision": "Lock capture and release semantics",
+      "ma_choice": "lock_req = |(gnt&lock&req) is registered together with owner_q. The owner is granted while lock_q and req[owner] hold. If the owner drops req, the lock is released and RR runs in the same cycle. A lock without a grant is ignored.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "D6: the same equations and the same same-cycle fallback.",
+      "difference": "none",
+      "note": "Confirmed via Q1."
+    },
+    {
+      "decision": "MAX_LOCK counting",
+      "ma_choice": "Only continuation cycles are counted, so a burst is at most MAX_LOCK+1 grants. Setting the parameter to L-1 includes the first cycle.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "D7: continuation-only counting, burst of MAX_LOCK+1, with the L-1 guidance.",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Behaviour at lock expiry",
+      "ma_choice": "The lock is cleared and the next cycle re-arbitrates with the owner at lowest priority. The arbiter is work-conserving, so the owner can be re-granted immediately if it is alone.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "D7: release at expiry, former owner lowest priority, immediate re-grant via RR if alone.",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Lock counter for MAX_LOCK=0",
+      "ma_choice": "The counter is unused; LCNT_W is forced to 1 and the timeout term is disabled.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "A generate-if removes the counter when MAX_LOCK=0.",
+      "difference": "none",
+      "note": "The functional intent is the same."
+    },
+    {
+      "decision": "Locked-status flag semantics",
+      "ma_choice": "gnt_locked = locked_now, which is high only on continuation cycles.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "D9: high only on lock-override cycles, low on the initial grant.",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Index/valid output timing",
+      "ma_choice": "gnt_id comes combinationally from an OR-tree one-hot-to-binary encoder and is 0 when invalid. gnt_valid = |gnt.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "D3 and S6: combinational and cycle-aligned, index 0 when invalid, valid = |gnt.",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Starvation bound and MAX_LOCK=0 caveat",
+      "ma_choice": "Worst case is (N-1)*(MAX_LOCK+1) cycles. With MAX_LOCK=0 the bound depends on masters releasing their locks.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "D8: R11 is conditional when MAX_LOCK=0. The plan re-derives (N-1)*(MAX_LOCK+1) and flags the user's (N-1)*MAX_LOCK as a discrepancy.",
+      "difference": "none",
+      "note": "The plan reaches the correct bound rather than adopting the user's figure."
+    },
+    {
+      "decision": "Backpressure / grant acknowledge",
+      "ma_choice": "No ack input; every grant cycle counts as served. A gnt_ack input is listed as an open extension.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "D2: no accept/ready input; every grant counts as served.",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Reset state and grant gating during reset",
+      "ma_choice": "mask_q resets to all 1s, giving requester 0 first priority. gnt is ANDed with rst_n so it is forced to 0 during reset. Deassertion is synchronised externally.",
+      "spec_settles_it": false,
+      "in_plan": "missing",
+      "plan_choice": "",
+      "difference": "none",
+      "note": "The plan has requester 0 first priority and external reset synchronisation (D11). It never forces combinational gnt to 0 while rst_n is low, so gnt can assert during reset."
+    },
+    {
+      "decision": "Timing budget for the combinational path",
+      "ma_choice": "About 60% of the 2 ns cycle goes to the arbiter. The critical path is req->increment->AND->mux->gnt, at 6-8 levels for N=16.",
+      "spec_settles_it": false,
+      "in_plan": "differs",
+      "plan_choice": "D10: about 50% (1 ns) of the cycle, with critical path req->masked PE->select->lock mux->gnt->index.",
+      "difference": "equivalent",
+      "note": "Only the budget split assumption differs."
+    }
+  ],
+  "needless_questions": [
+    "Q1"
+  ],
+  "summary": "The plan closely tracks the reference MA. It matches on the zero-latency combinational grant, the dual masked/unmasked priority scheme, lock capture and release with same-cycle fallback, continuation-only MAX_LOCK counting, expiry behaviour, locked-flag semantics, combinational index/valid outputs, the no-backpressure default and the (N-1)*(MAX_LOCK+1) starvation bound. The plan corrected the user's (N-1)*MAX_LOCK bound to reach that figure. Three differences are equivalent: updating the pointer on every grant rather than only on fresh arbitration (same resulting state), starting from a prefix-OR find-first rather than x&-x, and a 50% rather than 60% timing budget. The only omission is forcing combinational gnt to 0 during reset. Q1 was largely needless: R6 already says lock is asserted with req while granted, and R3/R4 imply the same-cycle fallback with no bubble. Q2 and Q3 resolved genuine ambiguities."
+}

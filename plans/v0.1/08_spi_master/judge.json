@@ -1,0 +1,154 @@
+{
+  "score": {
+    "key_decisions": 15,
+    "matches": 13,
+    "differs": 0,
+    "missing": 2,
+    "spec_silent": 14,
+    "spec_silent_differs": 0,
+    "material_differs": 0,
+    "needless_questions": 0,
+    "coverage": 0.867,
+    "agreement": 0.867,
+    "sound": 0.867
+  },
+  "key_decisions": [
+    {
+      "decision": "SCLK generation and clocking",
+      "ma_choice": "Single system clock domain. A half-period counter (DIV+1 cycles) produces events, and SCLK is a registered output toggled on those events. There are no derived clocks.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "D4: single clock domain, a 16-bit counter ticks every DIV+1 cycles, and the SCLK flop toggles on ticks.",
+      "difference": "none",
+      "note": "Both reach 50 MHz at DIV=0."
+    },
+    {
+      "decision": "TX buffering and write-while-busy",
+      "ma_choice": "No FIFO or holding register. A TXDATA write while BUSY is ignored and sets TX_OVR; the in-flight transfer is unaffected.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "D1: single shift register, the busy write is dropped and TX_OVR is set.",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Configuration binding time",
+      "ma_choice": "CPOL/CPHA/LSB/SIZE/CS_SEL/DIV are latched at start. CS_HOLD is read live at the end of LAG, and CPOL drives the idle SCLK directly.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "D3: snapshot at start, CS_HOLD live. S9 addresses the SCLK idle level following CPOL while idle or idle-held.",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Transfer FSM and CS guard timing",
+      "ma_choice": "IDLE/XFER/LAG/GAP. CS is asserted at start and the lead is one half-period before the first event. Lag and gap are one half-period each, all timed by the same divider.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "IDLE/LEAD/SHIFT/LAG/GAP plus HELD, with each phase lasting at least one half-period from the same tick counter.",
+      "difference": "none",
+      "note": "Plan has a separate LEAD state and a HELD state where MA uses a cs_held flag in IDLE. Structurally equivalent."
+    },
+    {
+      "decision": "BUSY/DONE coverage relative to LAG/GAP",
+      "ma_choice": "BUSY stays high through LAG and GAP. DONE is set on return to IDLE: after GAP, or after LAG when CS is held.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "D8: BUSY until IDLE (after GAP) or HELD (after LAG); DONE and RXDATA updated then.",
+      "difference": "none",
+      "note": "MA writes RXDATA at the end of the last edge, slightly before DONE. This is invisible to software."
+    },
+    {
+      "decision": "Held-CS release and CS swap semantics",
+      "ma_choice": "Clearing CS_HOLD while idle-held de-asserts CS on the next cycle. A different CS_SEL swaps CS in the same cycle with no gap.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "D7, taken from the Q1 answer, has identical behaviour.",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "EN semantics",
+      "ma_choice": "EN only gates start. There is no abort, and TXDATA writes with EN=0 are ignored with no flag.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "D11, taken from the Q2 answer.",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "MISO capture path",
+      "ma_choice": "No synchroniser. MISO is sampled directly on the system-clock edge of the sampling event, the round trip must fit in one half-period, and an IOB input flop is used.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "D5: direct capture treated as synchronous, with the timing budget documented.",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Shift/alignment datapath",
+      "ma_choice": "32-bit TX/RX shift registers. MSB-first is left-aligned on load, rx_sh is cleared at start so the upper bits of smaller words read 0, and RXDATA is updated only at completion.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "S5: right-aligned serialisation with zeroed upper bits for 8/16-bit words. S10 covers RXDATA reads during a transfer.",
+      "difference": "none",
+      "note": "Plan does not give the concrete alignment muxing but commits to the same visible behaviour."
+    },
+    {
+      "decision": "Interrupt type",
+      "ma_choice": "Level irq = IRQ_EN & DONE; TX_OVR does not raise the interrupt.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "D9: level irq = DONE & IRQ_EN; TX_OVR does not raise it.",
+      "difference": "none",
+      "note": "Plan registers irq, while MA makes it combinational from flops. Minor."
+    },
+    {
+      "decision": "Status set/clear priority",
+      "ma_choice": "A hardware set wins over a simultaneous W1C for DONE and TX_OVR.",
+      "spec_settles_it": false,
+      "in_plan": "missing",
+      "plan_choice": "",
+      "difference": "none",
+      "note": "S7 requires a winner to be stated but never picks one."
+    },
+    {
+      "decision": "Reserved SIZE=11",
+      "ma_choice": "Treated as 32-bit.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "D6: treated as 32-bit.",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Read path",
+      "ma_choice": "Registered rdata, valid the cycle after re; reads have no side effects.",
+      "spec_settles_it": true,
+      "in_plan": "matches",
+      "plan_choice": "D2: registered rdata, no read side effects.",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Reset style and pin reset values",
+      "ma_choice": "Active-low rst_n, async assert and sync de-assert. cs_n resets all high, sclk resets to 0 and then follows CPOL.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "D10: async-assert active-low; cs_n high on reset.",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "MOSI idle level and out-of-range CS_SEL",
+      "ma_choice": "MOSI holds the last bit between transfers. CS_SEL \u2265 NUM_CS runs a transfer with no CS asserted (dummy clocks).",
+      "spec_settles_it": false,
+      "in_plan": "missing",
+      "plan_choice": "",
+      "difference": "none",
+      "note": "Plan only says 'mosi defined' and flags NUM_CS>4 overflow. It gives no behaviour for either point."
+    }
+  ],
+  "needless_questions": [],
+  "summary": "The plan tracks the reference MA very closely. It has the same single-clock tick-based SCLK, an unbuffered TX with drop-and-flag, config latched at start with live CS_HOLD, BUSY covering LAG and GAP, the same held-CS release and swap semantics, EN as a start gate only, direct MISO sampling, level IRQ, and SIZE=11 treated as 32-bit. Its FSM adds explicit LEAD and HELD states, which is structurally equivalent. Two things are missing: the plan never commits to set-wins-over-W1C priority, and it leaves MOSI idle behaviour and out-of-range CS_SEL unspecified. Both questions (CS hold release and EN semantics) addressed points the spec leaves open and that shape the architecture, so neither was needless."
+}

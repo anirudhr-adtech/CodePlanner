@@ -1,0 +1,136 @@
+{
+  "score": {
+    "key_decisions": 13,
+    "matches": 7,
+    "differs": 6,
+    "missing": 0,
+    "spec_silent": 13,
+    "spec_silent_differs": 6,
+    "material_differs": 2,
+    "needless_questions": 0,
+    "coverage": 1.0,
+    "agreement": 0.538,
+    "sound": 0.846
+  },
+  "key_decisions": [
+    {
+      "decision": "Timebase generation",
+      "ma_choice": "A single prescaler produces a 100 ms tick enable in the 50 MHz domain, with no derived clocks. The 1 Hz flash is derived from the tick.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "A free-running prescaler produces a 100 ms tick enable. All timers and the flash generator count ticks, and there is no derived clock.",
+      "difference": "none",
+      "note": "Identical structure."
+    },
+    {
+      "decision": "Timing parameterisation and default values",
+      "ma_choice": "Compile-time parameters in ticks: GREEN_MIN 10 s, GREEN_MAX 45 s, EXT_GAP 3 s, YELLOW 4 s, ALLRED 2 s, WALK 7 s, PED_CLR 10 s.",
+      "spec_settles_it": false,
+      "in_plan": "differs",
+      "plan_choice": "Compile-time parameters in ticks with the same values, except max green is 40 s.",
+      "difference": "equivalent",
+      "note": "The only difference is a parameter value."
+    },
+    {
+      "decision": "Field input conditioning",
+      "ma_choice": "Only 2-flop synchronizers on all four inputs. Buttons are assumed debounced externally, and sensors get no debounce.",
+      "spec_settles_it": false,
+      "in_plan": "differs",
+      "plan_choice": "2-flop synchronizer plus a counter-based debounce/glitch filter on every sensor and button, followed by a request latch.",
+      "difference": "equivalent",
+      "note": "The plan adds four debounce counters and a few ms of latency. The control architecture is unchanged."
+    },
+    {
+      "decision": "Main FSM structure and power-up sequence",
+      "ma_choice": "Six-state FSM. Reset enters the existing AR_EW all-red state, so the first green is NS after ALLRED_T. There are no separate start-up states.",
+      "spec_settles_it": false,
+      "in_plan": "differs",
+      "plan_choice": "Six-state cycle plus dedicated start-up all-red state(s) with a separate parameter (~5 s), then NS green.",
+      "difference": "equivalent",
+      "note": "Both start all-red and then go to NS green. The plan adds a state and a parameter."
+    },
+    {
+      "decision": "Green extension algorithm",
+      "ma_choice": "Actuated gap-out/max-out. The gap timer is cleared by green-road vehicles. Max green is measured from green start (phase_cnt_q >= GREEN_MAX).",
+      "spec_settles_it": false,
+      "in_plan": "differs",
+      "plan_choice": "Actuated gap-out/max-out, but the max-green timer starts when an opposing call arrives.",
+      "difference": "material",
+      "note": "Both use the same scheme, but the max reference point differs. The worst-case green and the observable cycle timing differ, and the plan needs an extra timer."
+    },
+    {
+      "decision": "Behaviour with no cross demand",
+      "ma_choice": "Rest in the current green indefinitely. There is no preferred main road during operation.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "Rest in the current road's green indefinitely until an opposing call exists. Roads are treated symmetrically.",
+      "difference": "none",
+      "note": "The spec strongly implies this choice but leaves the rest road open."
+    },
+    {
+      "decision": "Definition of cross demand",
+      "ma_choice": "Cross demand is the cross car sensor OR the latched cross pedestrian request. Green ends only on cross_demand && min_done && (gapped || max_done) && !ped_hold.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "The opposing call is the opposing sensor OR the opposing latched ped request. Termination is gated by min green, gap/max, and the ped group being idle.",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Pedestrian service model",
+      "ma_choice": "Concurrent with the parallel green, with no exclusive ped phase. WALK starts at green entry, or mid-green when there is no cross demand. Clearance holds green, even past GREEN_MAX.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "Concurrent service with WALK at green onset or mid-green while resting. Green is held until clearance completes, even past GREEN_MAX.",
+      "difference": "none",
+      "note": "Settled by the answer to Q2."
+    },
+    {
+      "decision": "Pedestrian sub-FSM organisation",
+      "ma_choice": "A single shared ped sub-FSM with one ped_cnt that serves whichever crossing is parallel to the current green. The cross-road ped head is always steady DON'T WALK.",
+      "spec_settles_it": false,
+      "in_plan": "differs",
+      "plan_choice": "Two per-group pedestrian sub-FSMs, one tied to NS green and one tied to EW green.",
+      "difference": "equivalent",
+      "note": "Only one group can be active at a time, so the plan duplicates state and counters but behaves the same."
+    },
+    {
+      "decision": "Pedestrian request latch semantics",
+      "ma_choice": "The latch sets on the synced button and clears on WALK entry. A press during WALK is ignored, and a press during clearance latches for the next green of that road.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "The latch clears at WALK start. A press during flashing DON'T WALK re-latches for the next green of that road.",
+      "difference": "none",
+      "note": "The plan does not state what happens to a press during WALK, but its clear-at-WALK-start rule implies the same result."
+    },
+    {
+      "decision": "Lamp output structure and flashing",
+      "ma_choice": "Registered one-hot R/Y/G per road and registered walk/dont_walk outputs. Flashing DON'T WALK is produced internally from flash_q.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "Individual registered active-high lamp outputs. Flashing DON'T WALK is produced by gating with an internal ~1 Hz 50% flash signal.",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Reset style",
+      "ma_choice": "Active-low rst_n, asserted asynchronously and released synchronously. All lamps go red and all ped heads show steady DON'T WALK.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "Active-low reset, asserted asynchronously and released synchronously, plus a power-on reset counter. Safe all-red output.",
+      "difference": "none",
+      "note": "The plan adds a power-on reset counter, which is minor."
+    },
+    {
+      "decision": "Safety enforcement and fault handling",
+      "ma_choice": "Safe by construction: one-hot decode from a single state. Illegal encodings recover to AR_EW (all red). There is no conflict monitor; it is explicitly out of scope.",
+      "spec_settles_it": false,
+      "in_plan": "differs",
+      "plan_choice": "An independent hardware conflict monitor on the lamp outputs latches a fault and forces flashing red until reset. The FSM default case also routes to all-red.",
+      "difference": "material",
+      "note": "The plan adds a block and a visible fault mode (latched flashing red) that the MA excludes."
+    }
+  ],
+  "needless_questions": [],
+  "summary": "The plan tracks the MA closely on the core architecture: 100 ms tick timebase, six-state phase FSM, actuated gap-out with rest-in-green, cross demand including ped requests, concurrent latched pedestrian service holding green past max, and registered one-hot lamps with internal flashing. There are two material differences. First, the plan starts the max-green timer on arrival of opposing demand rather than at green start, which changes the observable maximum green. Second, it adds an independent conflict monitor with a latched flashing-red fault mode that the MA leaves out of scope. The smaller, equivalent differences are: debounce on all inputs versus sync-only, a dedicated start-up state versus reusing AR_EW, two pedestrian sub-FSMs versus one shared one, and a 40 s versus 45 s max green. Both questions were relevant. Q1 resolved the port count, and Q2 settled pedestrian/max-green interactions that the spec only hinted at."
+}

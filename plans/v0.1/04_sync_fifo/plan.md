@@ -1,0 +1,244 @@
+# MA plan: 04_sync_fifo
+
+## S1. Frame the parser-to-DMA FWFT FIFO and its single-clock scope
+
+**Goal:** Write the Overview. The block is a generic, parameterised, single-clock FIFO between the packet parser (producer) and the DMA engine (consumer). Headline features: FWFT read data, full/empty/almost_full/count status, and sticky overflow/underflow errors with a shared clear. It must be portable between FPGA and ASIC. This implementation uses only an async-read register array.
+
+**Feeds:** Overview · **Depends on:** none
+
+**Spec evidence:**
+- [P1] "Synchronous FIFO"
+- [P2] "We need a generic single-clock FIFO to sit between our packet parser and the DMA engine."
+- [P3] "Target is an FPGA, but it should port to ASIC too."
+
+**Decisions:**
+- D1 Read-side data presentation mode: **First-word-fall-through. rd_data always shows the oldest entry while empty==0, and rd_en pops it in the same cycle.** (decided)
+  - options: First-word-fall-through: head entry visible on rd_data whenever !empty; rd_en acts as a pop/acknowledge / Standard mode: data appears one cycle after rd_en
+  - The spec explicitly asks for data on the same cycle rd_en is asserted, so the DMA does not lose a cycle. The async-read array chosen in D5 gives this directly.
+
+**Done when:**
+- Overview names the producer and consumer and states the FWFT read semantics in one sentence
+- Overview lists every feature: configurable width/depth, full, empty, almost_full, count, sticky errors with the shared err_clr
+- Overview states the single clock, active-low reset and FPGA/ASIC portability goal
+- Overview lists non-goals: no clock-domain crossing, no packet awareness, no internal register interface, no block-RAM/SRAM variant in this implementation
+
+## S2. Define parameters and the full port list, including af threshold, count and the shared err_clr
+
+**Goal:** Fix the parameters (DATA_WIDTH, DEPTH) and every port. The spec only names wr_en, wr_data, rd_en, full, empty and almost_full. The writer must add rd_data, the threshold input, the count output, the overflow/underflow outputs and the single err_clr input.
+
+**Feeds:** Interface, Parameters · **Depends on:** S1
+
+**Spec evidence:**
+- [P3] "Data width and depth must be configurable. Typical use: 32 bits wide, 16 entries deep."
+- [P3] "Write side: `wr_en` + `wr_data`."
+- [P3] "Status outputs: `full`, `empty`, plus `almost_full` with a programmable threshold so the"
+- [P3] "A fill-level count would be nice for debug."
+- [P3] "Overflow and underflow should be sticky error flags that software can clear."
+
+**Decisions:**
+- D2 Allowed DEPTH values: **Power-of-two DEPTH only (minimum 2), checked by an elaboration-time assertion. Pointers are log2(DEPTH)+1 bits wide, with the extra wrap bit. The legal upper bound stays at 65536, with a documented recommendation of DEPTH <= 64 for the register-array implementation.** (default, medium impact, medium confidence)
+  - options: Power-of-two depth only, using wrap-bit pointers / Any depth >= 2, using explicit modulo wrap logic
+  - This gives the simplest and fastest pointer and flag logic and covers the typical depth of 16. Arbitrary depths cost extra compare and wrap logic.
+- D3 How the almost_full threshold is programmed: **Runtime input port of width log2(DEPTH)+1. almost_full = (count >= af_thresh).** (default, medium impact, medium confidence)
+  - options: Runtime input port (e.g. af_thresh) that software or the parser can change / Elaboration-time parameter / Both: parameter default plus runtime port
+  - 'Programmable' usually means software-settable at runtime. A port can still be tied to a constant if a fixed threshold is wanted.
+- D4 Fill-level count output: **Provide a count output, which is also used internally for almost_full.** (default, low impact, high confidence)
+  - options: Provide a count output of width log2(DEPTH)+1 / Omit count to save logic
+  - The spec calls it nice for debug, and the almost_full comparison needs the occupancy anyway, so it costs almost nothing.
+
+**Done when:**
+- Parameter table lists DATA_WIDTH (default 32) and DEPTH (default 16) with legal values (power of two, 2..65536), the recommended maximum of 64 for this register-array implementation, and derived widths
+- Parameter section notes that a future MEM_STYLE parameter is reserved for the block-RAM variant and is not implemented now
+- Port table gives name, direction, width, clock domain and one-line description for every port
+- Threshold, count, overflow and underflow ports appear, plus a single 1-bit err_clr input, with widths derived from the parameters
+- Interface section states the FWFT handshake: rd_data valid iff !empty, and rd_en is a pop
+
+## S3. Async-read register array storage and FWFT read mux (block-RAM variant deferred)
+
+**Goal:** Document the chosen storage, an async-read register array that maps to distributed/LUT RAM on FPGA and to a flop array plus read mux on ASIC, and how the head entry reaches rd_data with zero latency. Record the deferred sync-RAM plus prefetch variant.
+
+**Feeds:** Datapath, Block Diagram · **Depends on:** S2
+
+**Spec evidence:**
+- [P3] "We'd like the data to be available on the same cycle `rd_en` is"
+- [P3] "(show-ahead / first-word-fall-through) so the DMA doesn't lose a cycle."
+- [P3] "Target is an FPGA, but it should port to ASIC too."
+
+**Decisions:**
+- D5 Storage structure and FWFT read implementation: **Async-read register array written on clk, with a combinational read mux indexed by rd_ptr. It infers distributed/LUT RAM on FPGA and a flop array plus read mux on ASIC, and is suitable up to about 64 entries. Deeper FIFOs that need block RAM are deferred to a future variant: synchronous-read block RAM with a 1-entry output prefetch register, selected by a future MEM_STYLE parameter. That variant is not implemented here, even though DEPTH legally ranges up to 65536.** (decided)
+  - options: Generic register array with asynchronous read mux: rd_data = mem[rd_ptr] / Synchronous-read RAM plus prefetch/output register to emulate FWFT / Technology-wrapper memory selected per target
+  - User answer Q1.
+- D6 Whether rd_data is registered: **Combinational from the array mux. The mux select comes from the registered rd_ptr, so there is no input-to-output combinational path from rd_en.** (default, medium impact, medium confidence)
+  - options: rd_data driven combinationally from the array mux / rd_data driven from a dedicated output register updated on pop and on write-to-empty
+  - This is the simplest option and matches the async-read array. rd_data changes only after a clock edge, so the consumer sees a clock-to-out-plus-mux path rather than a path through its own rd_en.
+
+**Done when:**
+- Datapath section describes the write port (address wr_ptr, enable = wr_accept) and the async read mux (address rd_ptr)
+- States that the memory array is not reset and that rd_data is don't-care while empty
+- Discusses the clk-to-rd_ptr-to-mux-to-rd_data timing path and why the mux grows with DEPTH, which justifies the ~64 recommendation
+- Notes the FPGA LUTRAM inference and ASIC flop-array mapping
+- Describes the deferred MEM_STYLE block-RAM plus 1-entry prefetch variant as out of scope
+
+## S4. Pointer, occupancy and accept logic including simultaneous read/write at full and empty
+
+**Goal:** Specify the write/read accept conditions, pointer updates and occupancy tracking. Cover every combination of wr_en/rd_en at the empty, full and intermediate states. At empty, use the answered no-bypass rule.
+
+**Feeds:** Control Logic, Datapath · **Depends on:** S2, S3
+
+**Spec evidence:**
+- [P3] "Simultaneous read and write must work, including when the FIFO is full or empty."
+- [P3] "Writes when full must be ignored and flagged."
+
+**Decisions:**
+- D7 Simultaneous read+write when FULL: **Accept both. A write is accepted when !full || rd_en (rd_en while full is always a valid pop). No overflow is flagged in this case.** (default, medium impact, medium confidence)
+  - options: Accept both: the read frees the slot, the write fills it, and count is unchanged with no overflow / Reject the write because full was asserted at the start of the cycle (overflow flagged)
+  - 'Must work when full' most naturally means the FIFO keeps streaming at full occupancy. The cost is a combinational rd_en-to-write-accept path inside the block.
+- D8 Simultaneous read+write when EMPTY: **No bypass. Only the write is accepted, because rd_fire=0 while empty_q=1. The read is ignored and sets the sticky underflow flag. The written word becomes visible on rd_data in the next cycle, when empty deasserts.** (decided)
+  - options: Read ignored (underflow flagged), write accepted, data appears next cycle / Read ignored but no underflow flagged, write accepted / Combinational bypass: wr_data passes straight to rd_data and both are consumed (count stays 0)
+  - User answer Q2.
+
+**Done when:**
+- Truth table covers {empty, middle, full} x {wr_en, rd_en} with accept signals, pointer moves, count change and error setting, including the empty + wr_en + rd_en row (write accepted, underflow set)
+- Pointer width, wrap-bit scheme and full/empty derivation are written down
+- Accept equations are given explicitly: wr_accept = wr_en && (!full || rd_en) and rd_fire = rd_en && !empty_q
+- States that rejected writes and reads leave pointers and memory untouched
+
+## S5. Status flag generation: full, empty, almost_full and count timing
+
+**Goal:** Decide whether status outputs are registered or decoded from the pointers. Define their exact update cycle relative to accepted operations and threshold changes.
+
+**Feeds:** Control Logic, Timing & Pipeline · **Depends on:** S4
+
+**Spec evidence:**
+- [P3] "Status outputs: `full`, `empty`, plus `almost_full` with a programmable threshold so the"
+- [P3] "parser can stop early. A fill-level count would be nice for debug."
+
+**Decisions:**
+- D9 Status flag implementation: **Registered full, empty and count, computed from next-state values so they reflect the current state with no extra lag. almost_full is registered as count_next >= af_thresh.** (default, low impact, medium confidence)
+  - options: Registered flags computed from next-state count/pointers (glitch-free, updated the cycle after the operation) / Combinational decode of the current registered pointers
+  - Flop outputs give clean timing for the parser and DMA in both FPGA and ASIC flows, and a registered empty_q matches the Q2 answer wording. A threshold change takes effect one cycle later, which is acceptable for a 'stop early' hint.
+
+**Done when:**
+- Equations for full, empty, almost_full and count are written, including the threshold edge cases 0 and > DEPTH
+- States that flags reflect the state after the most recent clock edge, with no extra latency
+- Defines almost_full behaviour when af_thresh is changed at runtime
+
+## S6. Sticky overflow/underflow flags with a single shared err_clr (clear wins)
+
+**Goal:** Define when overflow and underflow are set and how they stay latched. They are cleared by one shared single-cycle err_clr pulse from an external CSR block. If err_clr and a new error occur in the same cycle, the clear wins.
+
+**Feeds:** Control Logic, Corner Cases & Error Handling · **Depends on:** S4
+
+**Spec evidence:**
+- [P3] "Overflow and underflow should be sticky error flags that software can clear."
+- [P3] "Writes when full must be ignored and flagged."
+
+**Decisions:**
+- D10 Mechanism for software to clear the sticky error flags: **A single shared err_clr input: a single-cycle pulse that clears both overflow and underflow. The FIFO has no register interface of its own. If err_clr and a new error happen in the same cycle, err_clr wins and the new error is lost. This priority rule is recorded as still to be confirmed with the software team.** (decided)
+  - options: Separate single-cycle clear input pulses per flag (clr_overflow, clr_underflow) driven by an external CSR block / One shared err_clr input clearing both flags / Embedded register interface (APB/AXI-Lite) inside the FIFO
+  - User answer Q3.
+- D11 Whether underflow is detected and the read is ignored: **A read while empty is ignored and sets the sticky underflow flag, including when it coincides with a write (per Q2). The overflow flag is set the same way for a rejected write.** (decided)
+  - options: rd_en while empty is ignored (no pointer move) and sets the sticky underflow flag / rd_en while empty is undefined behaviour with no flag
+  - The spec requires both overflow and underflow as sticky flags and says writes when full are ignored. The Q2 answer confirms underflow on a read at empty.
+
+**Done when:**
+- Set conditions are given in terms of the S4 accept logic: overflow on wr_en && !wr_accept, underflow on rd_en && empty_q
+- Next-state equation shows err_clr priority over set, e.g. flag_next = err_clr ? 0 : (flag | set)
+- Documents that an error coinciding with err_clr is lost, and marks this as to be confirmed with the software team
+- Flag reset value is 0
+- States whether a per-event pulse output is also provided (writer's choice) and records it as an assumption
+
+## S7. Cycle-level timing for FWFT pop, write-to-visible latency and back-to-back streaming
+
+**Goal:** Document the latency and throughput relationships, with waveforms the DMA and parser designers can rely on.
+
+**Feeds:** Timing & Pipeline · **Depends on:** S3, S4, S5, S6
+
+**Spec evidence:**
+- [P3] "so the DMA doesn't lose a cycle."
+- [P3] "Simultaneous read and write must work, including when the FIFO is full or empty."
+
+**Done when:**
+- States write-to-read latency: the first write into an empty FIFO is visible on rd_data and empty deasserts after 1 clock
+- Waveforms cover: first write to empty, back-to-back pops, simultaneous read/write at full, simultaneous read/write at empty (underflow set, data visible next cycle), and err_clr colliding with an error
+- States sustained throughput of 1 word per cycle in each direction once non-empty
+- Lists critical combinational paths: rd_en to wr_accept to memory write enable, and rd_ptr to read mux to rd_data
+
+## S8. Single clock and active-low reset strategy portable to FPGA and ASIC
+
+**Goal:** Define the clock and reset scheme: reset polarity, synchronous vs asynchronous assertion, what is reset, and the post-reset state.
+
+**Feeds:** Clocking & Reset · **Depends on:** S2
+
+**Spec evidence:**
+- [P3] "One clock, active-low reset. Target is an FPGA, but it should port to ASIC too."
+
+**Decisions:**
+- D12 Reset style for the active-low reset: **Asynchronous-assert active-low rst_n on control flops (pointers, count, flags), assuming deassertion is already synchronised upstream. The memory array is not reset.** (default, medium impact, medium confidence)
+  - options: Asynchronous assert, synchronous deassert (reset synchroniser external to the block) / Fully synchronous active-low reset
+  - Async-assert is the ASIC norm and is well supported on FPGAs. Leaving the array unreset preserves LUTRAM inference and saves area.
+
+**Done when:**
+- Reset value is listed for every control flop: empty=1, full=0, almost_full per threshold rule, count=0, errors=0
+- States that memory contents are undefined after reset
+- States the requirement for synchronous deassertion and who provides it
+- States the single clock domain, that no CDC is present, and that err_clr is synchronous to clk
+
+## S9. Block diagram tying storage, pointer/count control, flag logic and error latches
+
+**Goal:** Draw the top-level structure and show how the blocks connect.
+
+**Feeds:** Block Diagram · **Depends on:** S3, S4, S5, S6
+
+**Spec evidence:**
+- [P2] "We need a generic single-clock FIFO to sit between our packet parser and the DMA engine."
+
+**Done when:**
+- Diagram shows the write-accept logic, wr_ptr/rd_ptr registers, register-array memory, async read mux, count register, flag comparators and sticky error latches with the shared err_clr
+- Every external port from S2 appears on the diagram
+- Paths from rd_en into write accept are marked
+
+## S10. Verification plan focused on FWFT semantics, boundary R/W and sticky errors
+
+**Goal:** Define the testbench, scoreboard, directed boundary tests, random tests, assertions and coverage for this FIFO.
+
+**Feeds:** Verification Plan · **Depends on:** S4, S5, S6, S7, S8
+
+**Spec evidence:**
+- [P3] "Simultaneous read and write must work, including when the FIFO is full or empty."
+- [P3] "Overflow and underflow should be sticky error flags that software can clear."
+- [P3] "Data width and depth must be configurable."
+
+**Done when:**
+- A reference-model scoreboard checks data order and values against FWFT rd_data
+- Directed tests cover: fill to full, drain to empty, simultaneous R/W at full, simultaneous R/W at empty (write kept, underflow set, data next cycle), overflow and underflow set/clear via err_clr, err_clr-vs-error collision (clear wins), threshold changes, and reset mid-traffic
+- Constrained-random traffic runs across several DATA_WIDTH/DEPTH combinations within the supported range, including DEPTH=2 and DEPTH=64
+- Assertions defined: never both full and empty, count within 0..DEPTH, rd_data stable while !empty and no pop, no memory write when !wr_accept
+- Coverage lists all wr_en/rd_en x state combinations, every count value, and err_clr coinciding with each error type
+
+## S11. Record defaulted choices, the pending err_clr priority confirmation and the deferred block-RAM variant
+
+**Goal:** Collect every defaulted decision, assumption, pending confirmation and deferred variant into the Assumptions & Open Questions section. Enumerate the corner cases.
+
+**Feeds:** Assumptions & Open Questions, Corner Cases & Error Handling · **Depends on:** S2, S3, S4, S5, S6, S8
+
+**Spec evidence:**
+- [P3] "We'd like the data to be available on the same cycle `rd_en` is"
+- [P3] "Overflow and underflow should be sticky error flags that software can clear."
+
+**Done when:**
+- Each still-defaulted decision (D2, D3, D4, D6, D7, D9, D12) is listed with its chosen default and the question to confirm
+- Decided items from user answers (D5, D8, D10) are recorded as resolved
+- The err_clr-wins-over-new-error rule is listed as open pending confirmation with the software team
+- Corner cases are enumerated: DEPTH=2, DEPTH>64 (legal but outside the recommended range), threshold 0 or > DEPTH, rd_data while empty, read+write at empty, reset during a full FIFO, error coinciding with err_clr
+- The future variant is noted: MEM_STYLE-selected sync-read block RAM with 1-entry prefetch for depths >64, not implemented
+
+## Assumptions (defaults not confirmed by the user)
+
+- D2 Allowed DEPTH values: Power-of-two DEPTH only (minimum 2), checked by an elaboration-time assertion. Pointers are log2(DEPTH)+1 bits wide, with the extra wrap bit. The legal upper bound stays at 65536, with a documented recommendation of DEPTH <= 64 for the register-array implementation. (medium impact, medium confidence)
+- D3 How the almost_full threshold is programmed: Runtime input port of width log2(DEPTH)+1. almost_full = (count >= af_thresh). (medium impact, medium confidence)
+- D4 Fill-level count output: Provide a count output, which is also used internally for almost_full. (low impact, high confidence)
+- D6 Whether rd_data is registered: Combinational from the array mux. The mux select comes from the registered rd_ptr, so there is no input-to-output combinational path from rd_en. (medium impact, medium confidence)
+- D7 Simultaneous read+write when FULL: Accept both. A write is accepted when !full || rd_en (rd_en while full is always a valid pop). No overflow is flagged in this case. (medium impact, medium confidence)
+- D9 Status flag implementation: Registered full, empty and count, computed from next-state values so they reflect the current state with no extra lag. almost_full is registered as count_next >= af_thresh. (low impact, medium confidence)
+- D12 Reset style for the active-low reset: Asynchronous-assert active-low rst_n on control flops (pointers, count, flags), assuming deassertion is already synchronised upstream. The memory array is not reset. (medium impact, medium confidence)

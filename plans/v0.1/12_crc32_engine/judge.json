@@ -1,0 +1,127 @@
+{
+  "score": {
+    "key_decisions": 12,
+    "matches": 5,
+    "differs": 6,
+    "missing": 1,
+    "spec_silent": 11,
+    "spec_silent_differs": 6,
+    "material_differs": 3,
+    "needless_questions": 0,
+    "coverage": 0.917,
+    "agreement": 0.417,
+    "sound": 0.667
+  },
+  "key_decisions": [
+    {
+      "decision": "CRC formulation and bit ordering",
+      "ma_choice": "Reflected (LSB-first) LFSR with polynomial 0xEDB88320. s_data bit 0 of byte 0 is processed first, so neither data nor result needs bit reversal.",
+      "spec_settles_it": true,
+      "in_plan": "matches",
+      "plan_choice": "S3/D3 use the standard reflected-in/out CRC with an explicit tdata-to-LFSR mapping, checked against 0xCBF43926.",
+      "difference": "none",
+      "note": "The plan leaves the exact equation to the MA writer, but the convention is the same."
+    },
+    {
+      "decision": "Partial last-word handling",
+      "ma_choice": "Four parallel next-state XOR networks (8/16/24/32 bits) computed from crc_q, with a 4:1 mux selected by the byte count decoded from keep.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "D4: four parallel update matrices selected by decoded tkeep on the last beat.",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Zero-bubble frame-to-frame state reload",
+      "ma_choice": "crc_q loads INIT on the same edge that a last beat is accepted. Frame state is implicit and there is no SOF flag or FSM.",
+      "spec_settles_it": false,
+      "in_plan": "differs",
+      "plan_choice": "D5: an SOF flag is set after tlast, and the 0xFFFFFFFF preset is muxed in as the current state on the SOF beat.",
+      "difference": "equivalent",
+      "note": "Both give zero bubbles. The plan's version puts the preset mux in the loop at the start of the next frame and adds a flag; otherwise the structure is the same."
+    },
+    {
+      "decision": "Result buffering and stall policy",
+      "ma_choice": "Single registered result slot. s_ready = !res_valid_q || m_crc_ready, and it stalls every beat (not only last beats). No FIFO, no drops.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "D6: single slot with slot_free = !crc_valid || crc_ready, stalling every beat, never dropping results.",
+      "difference": "none",
+      "note": "Settled through the Q1 answer."
+    },
+    {
+      "decision": "Placement on the stream (tap topology)",
+      "ma_choice": "Off-path snoop. The block only takes s_valid/s_data/s_keep/s_last in and drives s_ready, which the integrator ANDs into the parent stream's ready. There is no data output.",
+      "spec_settles_it": false,
+      "in_plan": "differs",
+      "plan_choice": "D12: in-line combinational pass-through with s_axis in and m_axis out. Data is wired through, and m_tvalid and s_tready are both gated by slot_free.",
+      "difference": "material",
+      "note": "This changes the port list and integration: an extra 32+4+1-bit output stream, and the block now sits in the data path. Both approaches are defensible."
+    },
+    {
+      "decision": "Result value format and wire byte order",
+      "ma_choice": "m_crc = crc_upd ^ XOROUT, already reflected and inverted. m_crc[7:0] is the first FCS byte on the wire.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "D3: standard inverted, reflected value, with crc_data[7:0] as the first FCS byte transmitted.",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Result latency and pipelining",
+      "ma_choice": "Unpipelined single-cycle CRC loop (about 4 LUT levels). The result is registered and valid one cycle after the last beat is accepted.",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "D8: single-cycle loop, registered result 1 cycle after tlast, with data pre-registering as a fallback.",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "RX FCS checking support",
+      "ma_choice": "The block just computes the CRC over all observed bytes and emits it. The residue property is used only in verification; there is no residue output and no FCS-exclusion mode.",
+      "spec_settles_it": false,
+      "in_plan": "differs",
+      "plan_choice": "D7: adds a residue_ok status bit to the result channel that compares against the 802.3 good-frame residue.",
+      "difference": "material",
+      "note": "This adds a comparator and an extra interface bit on the result channel. It came from the Q2 answer."
+    },
+    {
+      "decision": "Error reporting mechanism",
+      "ma_choice": "Sticky keep_err output with an err_clr input only. No in-band per-frame error bit; the frame's CRC is still produced.",
+      "spec_settles_it": false,
+      "in_plan": "differs",
+      "plan_choice": "D11: a per-frame error bit on the result channel plus a sticky error output.",
+      "difference": "material",
+      "note": "The result channel carries an extra bit, and a per-frame error accumulator is added. The MA lists the in-band bit as an open question."
+    },
+    {
+      "decision": "Malformed byte-enable fallback semantics",
+      "ma_choice": "Illegal keep on a non-last beat is treated as 4 bytes. A non-contiguous last keep uses highest set bit + 1. keep=0000 with last closes the frame with the CRC unchanged. A result is always produced and the block never hangs.",
+      "spec_settles_it": false,
+      "in_plan": "missing",
+      "plan_choice": "",
+      "difference": "none",
+      "note": "The plan only says 'deterministic fallback byte count, defined by the MA writer'. It does not choose the actual rules."
+    },
+    {
+      "decision": "Parameterisation",
+      "ma_choice": "DATA_W fixed at 32. POLY_REFL, INIT and XOROUT are parameters, so any reflected CRC-32 variant can be built.",
+      "spec_settles_it": false,
+      "in_plan": "differs",
+      "plan_choice": "D2: fixed 32-bit width, with polynomial, preset, final XOR and residue as localparams. The matrix function is written so it can be widened later.",
+      "difference": "equivalent",
+      "note": "The plan uses localparams instead of overridable parameters, which is a minor flexibility difference."
+    },
+    {
+      "decision": "Reset scope",
+      "ma_choice": "Synchronous active-low reset. crc_q resets to INIT, and res_q, res_valid_q and keep_err_q reset to 0. Frames interrupted by reset must be restarted by upstream.",
+      "spec_settles_it": false,
+      "in_plan": "differs",
+      "plan_choice": "D10: synchronous active-low reset on control flops only, with datapath flops unreset. A partial frame after reset is treated as a new frame.",
+      "difference": "equivalent",
+      "note": "Sync active-low itself is fixed by the spec. Only the scope of reset on datapath flops differs."
+    }
+  ],
+  "needless_questions": [],
+  "summary": "The plan matches the MA on the core datapath: reflected LFSR, four keep-selected parallel networks, zero-bubble reload, a single result slot that stalls all beats, the standard output byte order and 1-cycle latency. Its reload uses an SOF-flag preset mux instead of loading INIT on the last beat, which is equivalent. There are three material differences, all at the interface: (1) the block is an in-line pass-through with m_axis outputs instead of an off-path snoop that exposes s_ready for the integrator to AND in; (2) a residue_ok bit is added to the result channel; (3) a per-frame in-band error bit is added on top of the sticky flag. The plan leaves the concrete malformed-keep fallback rules to the MA writer, so that decision is missing. Both questions asked were reasonable, since the spec is silent on consumer back-pressure and on whether RX FCS bytes are present."
+}

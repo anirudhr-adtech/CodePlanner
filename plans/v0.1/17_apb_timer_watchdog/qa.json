@@ -1,0 +1,16 @@
+[
+  {
+    "id": "Q1",
+    "decision_id": "D7",
+    "question": "When software writes WDT_LOAD (or sets WDT_CTRL.EN), should WDT_VALUE be reloaded immediately, or only on the next kick or expiry?",
+    "in_doc": true,
+    "answer": "Not immediately. A WDT_LOAD write does not reload WDT_VALUE; the new LOAD takes effect only at the next valid kick or expiry. Setting EN does not reload either: the counter resumes from its current WDT_VALUE, since only kick_ok, wexpire or a tick change wvalue."
+  },
+  {
+    "id": "Q2",
+    "decision_id": "D10",
+    "question": "When a kick violates the window (WIN_EN=1 and WDT_VALUE > WDT_WINDOW), should it still reload the counter and clear WARN, or be ignored apart from flagging the violation?",
+    "in_doc": true,
+    "answer": "No reload and no WARN clear. A window-violating kick sets WIN_VIOL and asserts wdt_rst_req if RES_EN=1. Apart from that it is ignored: kick_ok = kick & ~win_bad, so the counter is not reloaded and WARN is not cleared."
+  }
+]

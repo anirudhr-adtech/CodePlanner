@@ -1,0 +1,9 @@
+[
+  {
+    "id": "Q1",
+    "decision_id": "D6",
+    "question": "When software clears EN or GEN mid-pulse, should the output go inactive immediately (truncating the pulse) or finish the current period first? And should counters reset to 0 or hold their value while stopped?",
+    "in_doc": true,
+    "answer": "Stop immediately; do not finish the period. Clearing EN or GEN takes effect at once: the output goes to its inactive level (the POL value) on the next cycle, which can truncate the pulse. The counter is cleared to 0 and dir to 0 while stopped, not held. While the channel is stopped, the shadow registers continuously track the preloads. So re-enabling starts a clean new period at count 0 with the latest PERIOD, DUTY and CENTER values."
+  }
+]

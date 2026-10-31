@@ -1,0 +1,136 @@
+{
+  "score": {
+    "key_decisions": 13,
+    "matches": 10,
+    "differs": 3,
+    "missing": 0,
+    "spec_silent": 11,
+    "spec_silent_differs": 3,
+    "material_differs": 0,
+    "needless_questions": 0,
+    "coverage": 1.0,
+    "agreement": 0.769,
+    "sound": 1.0
+  },
+  "key_decisions": [
+    {
+      "decision": "Channel count",
+      "ma_choice": "NUM_BTN parameter, default 4, with replicated independent channels via a generate loop",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "NUM_BUTTONS parameter, default 4, with identical independent channels",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Debounce-time configuration",
+      "ma_choice": "CLK_HZ plus DEBOUNCE_MS (milliseconds); CNT_MAX and CNT_W derived as localparams",
+      "spec_settles_it": false,
+      "in_plan": "differs",
+      "plan_choice": "CLK_FREQ_HZ plus DEBOUNCE_US (microseconds, default 10000); count and width derived",
+      "difference": "equivalent",
+      "note": "The spec requires a build-time setting and no hard-coded clock, but leaves the unit open. Microseconds give finer tuning; the structure is unchanged."
+    },
+    {
+      "decision": "Elaboration overflow and range checks",
+      "ma_choice": "Divide CLK_HZ/1000 first to avoid 32-bit overflow; $error if the count rounds to 0",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "Order the division or use 64-bit math; elaboration checks or $error for a count of 0 or 1 and for counts that are too large",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Synchronizer depth and attributes",
+      "ma_choice": "SYNC_STAGES parameter, default 2 (range 2-4), ASYNC_REG/don't-touch attributes, one synchronizer per bit",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "SYNC_STAGES parameter, default 2 and minimum 2, ASYNC_REG/keep attributes, plus a false-path constraint note",
+      "difference": "none",
+      "note": "The spec requires a synchronizer but not its depth."
+    },
+    {
+      "decision": "Placement of polarity inversion",
+      "ma_choice": "Invert before the first sync flop, so the synchronizer resets to 0",
+      "spec_settles_it": false,
+      "in_plan": "differs",
+      "plan_choice": "Invert after the last sync stage; no logic before the first flop; synchronizer resets to the raw idle value 1",
+      "difference": "equivalent",
+      "note": "Both keep the internal logic active-high. The only effect is on the synchronizer reset value."
+    },
+    {
+      "decision": "Debounce algorithm",
+      "ma_choice": "Counter increments while the synced input differs from level_q and clears on any agreement; level flips after CNT_MAX+1 consecutive cycles; the rule is symmetric for press and release",
+      "spec_settles_it": true,
+      "in_plan": "matches",
+      "plan_choice": "Continuous stable-window counter that holds at 0 on match, increments on mismatch, and flips the state at the terminal count",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Counter organization",
+      "ma_choice": "Independent full-width counter per channel, with no shared prescaler",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "Independent full-width counter per button counting clock cycles",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Edge pulse generation",
+      "ma_choice": "level_d1_q delayed copy; rise and fall decoded combinationally from level_q and level_d1_q; the pulse coincides with the first cycle of the new level",
+      "spec_settles_it": false,
+      "in_plan": "differs",
+      "plan_choice": "Dedicated pulse registers set on the same edge that flips level (flip & ~state / flip & state); all outputs come directly from flops",
+      "difference": "equivalent",
+      "note": "The pulse timing relative to the level is the same. The plan registers the pulses, while the MA decodes them from two flops. Both are glitch-free."
+    },
+    {
+      "decision": "Reset style",
+      "ma_choice": "Active-low reset, asynchronous assert and synchronous de-assert supplied by the reset controller; no internal reset synchronizer",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "Asynchronous active-low reset on all flops; de-assertion assumed synchronized externally",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Power-up state and button held through reset",
+      "ma_choice": "All registers reset to released/0; a held button produces one rise pulse after the debounce time",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "Levels reset to 0 (released); a held button is reported as a normal press with a pulse after one debounce time",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Consumer interface and domain",
+      "ma_choice": "Pulses are 1 clk wide and sampled in the same domain; no sticky or W1C event bits (noted as a future option)",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "No interrupt or bus interface; outputs consumed in the same clk domain (stated as an assumption)",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Output bundle",
+      "ma_choice": "Three NUM_BTN-wide vectors: level, rise, fall",
+      "spec_settles_it": true,
+      "in_plan": "matches",
+      "plan_choice": "Three NUM_BUTTONS-wide vectors: level, press pulse, release pulse",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Verification strategy",
+      "ma_choice": "Bounce model, scaled-down parameters plus one real-parameter run, boundary glitch tests at CNT_MAX and CNT_MAX+1, SVA for pulse width, exclusivity and alternation",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "Randomized bounce generator, scaled debounce time plus a real-parameter run, scoreboard, and assertions for pulse width, exclusivity and N stable cycles; parameter sweeps; CDC lint",
+      "difference": "none",
+      "note": "The plan does not explicitly list the exact CNT_MAX boundary glitch test, but it is otherwise aligned."
+    }
+  ],
+  "needless_questions": [],
+  "summary": "The plan agrees closely with the MA. It matches on the parameterized channel count, derived terminal count with overflow and $error handling, a 2-stage parameterizable synchronizer with ASYNC_REG, the restart-on-change stability counter, per-channel counters, the reset style, power-up behaviour with a held button, the three output vectors, the same-domain consumer assumption and the verification approach. There are three differences, all equivalent: the debounce unit (microseconds vs milliseconds), inversion after rather than before the synchronizer, and registered pulse flops instead of a delayed-copy combinational decode, with the same visible timing. No questions were asked, so none were needless."
+}

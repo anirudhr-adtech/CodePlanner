@@ -1,0 +1,16 @@
+[
+  {
+    "id": "Q1",
+    "decision_id": "D9",
+    "question": "May COMPLETE be issued out of order, or for a source whose priority changed since claim? Should we match COMPLETE by stored ID per level (robust), or simply clear the level of the source's current priority?",
+    "in_doc": true,
+    "answer": "Yes, both are allowed. Match COMPLETE by the ID stored per level, not by the source's current priority. COMPLETE clears isr_v[L] for the highest level L where isr_v[L] is set and isr_id[L] equals the written ID. If no level matches, the write is ignored with no error. Out-of-order completes clear that level, and the effective threshold stays at the highest remaining in-service level. If the priority changed while the source was in service, the stored level is used for completion. If the same ID is in service at two levels, the highest one is cleared first."
+  },
+  {
+    "id": "Q2",
+    "decision_id": "D5",
+    "question": "Source IDs are 0..31, so what should CLAIM return when nothing is claimable: 32, a value with a valid flag bit, or should sources be numbered 1..32 so 0 means none?",
+    "in_doc": true,
+    "answer": "Use a valid flag. CLAIM returns [31] VALID and [4:0] ID, with source IDs kept as 0..31. When nothing is claimable, the read returns 0 (VALID=0) and changes no state. Software must check VALID, not ID != 0, because ID 0 is a real source."
+  }
+]

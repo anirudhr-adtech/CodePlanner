@@ -1,0 +1,9 @@
+[
+  {
+    "id": "Q1",
+    "decision_id": "D6",
+    "question": "What CPU bus should the I2C master register interface use: APB, a plain register port, AHB-Lite, or something else?",
+    "in_doc": true,
+    "answer": "A plain register port: the same simple 32-bit bus as the other peripherals, not APB or AHB-Lite. Signals are addr[4:0] (byte address, bits [1:0] ignored), wdata[31:0], we, re, and rdata[31:0]. rdata is registered and valid one cycle after re. The register layout follows the OpenCores I2C style: PRESC/CTRL/TXR/RXR/CMD/STATUS."
+  }
+]

@@ -1,0 +1,163 @@
+{
+  "score": {
+    "key_decisions": 16,
+    "matches": 12,
+    "differs": 0,
+    "missing": 4,
+    "spec_silent": 15,
+    "spec_silent_differs": 0,
+    "material_differs": 0,
+    "needless_questions": 0,
+    "coverage": 0.75,
+    "agreement": 0.75,
+    "sound": 0.75
+  },
+  "key_decisions": [
+    {
+      "decision": "Clock domain for timers and watchdog",
+      "ma_choice": "Single PCLK domain; WDT ticks from a PCLK prescaler; no CDC inside the block",
+      "spec_settles_it": true,
+      "in_plan": "matches",
+      "plan_choice": "D1: single PCLK domain, WDT counts on PRESC-generated PCLK ticks",
+      "difference": "none",
+      "note": "The spec lists only PCLK and defines WDT PRESC in PCLK cycles."
+    },
+    {
+      "decision": "Top-level partition",
+      "ma_choice": "apb_regif decoder/mux, two generate-instanced tmr_core, one wdt_core with the lock inside it, IRQ status/enable regs inline at top",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "APB decoder, 2 timer instances, WDT core, separate lock unit, output logic",
+      "difference": "none",
+      "note": "Placing the lock flop as a separate unit rather than inside wdt_core is a cosmetic difference."
+    },
+    {
+      "decision": "PSLVERR scope and handling of illegal accesses to mapped registers",
+      "ma_choice": "PSLVERR = acc & ~mapped only; writes to RO or locked registers are silently ignored; WDT_KICK reads 0",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "D2: PSLVERR only for unmapped offsets; RO and locked writes ignored; KICK reads 0",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "PADDR[1:0] handling",
+      "ma_choice": "Decode PADDR[11:2] only and ignore the low bits",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "D3: ignore PADDR[1:0]",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Same-cycle collision priorities (RW1C vs hardware set, CTRL write vs one-shot EN clear, LOAD write vs tick)",
+      "ma_choice": "Hardware set wins over W1C; software CTRL write wins over the one-shot EN clear; a LOAD write wins over a tick and suppresses that tick's events",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "D4: hardware set wins, software CTRL write wins; LOAD-vs-tick is listed as a corner case to resolve",
+      "difference": "none",
+      "note": "The plan does not explicitly state that a LOAD-write tick suppresses its events, but the main priority rules agree."
+    },
+    {
+      "decision": "Prescaler implementation details",
+      "ma_choice": "Tick when pcnt >= presc, so lowering PRESC mid-count is safe; the prescaler is held at 0 while EN=0 and cleared on a LOAD write",
+      "spec_settles_it": false,
+      "in_plan": "missing",
+      "plan_choice": "",
+      "difference": "none",
+      "note": "The plan only says this behaviour 'is stated' in S4 done_when, without making a choice."
+    },
+    {
+      "decision": "Compare-match semantics on reload",
+      "ma_choice": "A periodic reload to a value equal to CMP fires CMP; a LOAD write equal to CMP does not",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "S4: a reload equal to CMP sets CMP (tick-caused); a LOAD write does not",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "CMP suppression on the one-shot expiry tick",
+      "ma_choice": "cmp_evt is masked on the one-shot expiry tick, so CMP=0 fires only once",
+      "spec_settles_it": false,
+      "in_plan": "missing",
+      "plan_choice": "",
+      "difference": "none",
+      "note": "The plan does not address the double-fire hazard when CMP=0 in one-shot mode."
+    },
+    {
+      "decision": "Interrupt output generation",
+      "ma_choice": "timer_irq = |(status & en) and wdt_irq = warn & int_en, both combinational from flops; wdt_rst_req is registered",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "D5: combinational AND/OR from flops; sticky rst_req flop",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Effect of a WDT_LOAD write or EN set on WDT_VALUE",
+      "ma_choice": "No reload; only kick_ok, wexpire or a tick change wvalue",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "D7, via Q1",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Window-violating kick behaviour",
+      "ma_choice": "Sets WIN_VIOL and rst_req if RES_EN; no reload and no WARN clear",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "D10, via Q2",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Second expiry with RES_EN=0",
+      "ma_choice": "Reload and keep counting with WARN still set",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "D8: reload and keep counting, WARN stays set",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Watchdog behaviour after wdt_rst_req asserts",
+      "ma_choice": "wtick is gated by ~rst_req_q, so the counter freezes until PRESETn",
+      "spec_settles_it": false,
+      "in_plan": "missing",
+      "plan_choice": "",
+      "difference": "none",
+      "note": "The plan only ensures rst_req is sticky; counter behaviour in the FIRED state is not decided."
+    },
+    {
+      "decision": "WARN next-state priority and a kick while disabled",
+      "ma_choice": "kick_ok clears > first expiry sets > W1C clear; a kick while EN=0 still reloads and clears WARN",
+      "spec_settles_it": false,
+      "in_plan": "missing",
+      "plan_choice": "",
+      "difference": "none",
+      "note": "The plan lists the kick-vs-expiry and kick-while-disabled cases as to-be-stated but gives no resolution. Only hardware set over W1C is decided."
+    },
+    {
+      "decision": "Wrong kick key handling",
+      "ma_choice": "Ignored entirely; not a violation",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "D11: ignored, no PSLVERR",
+      "difference": "none",
+      "note": ""
+    },
+    {
+      "decision": "Reset style",
+      "ma_choice": "Async assert, sync de-assert (at SoC level), active-low PRESETn",
+      "spec_settles_it": false,
+      "in_plan": "matches",
+      "plan_choice": "D12: async active-low; system synchronises deassertion",
+      "difference": "none",
+      "note": ""
+    }
+  ],
+  "needless_questions": [],
+  "summary": "The plan is well aligned with the MA on all major visible-behaviour choices: single clock, partition, PSLVERR scope, collision priorities, combinational IRQs, WDT_LOAD/EN not reloading, window-violation semantics, RES_EN=0 re-expiry and the wrong-key policy. Both questions asked addressed real spec gaps. The gaps are several lower-level control decisions the MA makes explicitly and the plan defers without choosing: the >= prescaler compare and prescaler reset on EN=0, CMP suppression on the one-shot expiry tick, freezing the WDT counter after rst_req, and the full WARN priority ordering including a kick while disabled. The plan also adds a WDT prescaler restart on kick, which the MA does not describe."
+}

@@ -1,0 +1,605 @@
+{
+  "steps": [
+    {
+      "id": "S1",
+      "title": "Frame the block as a data-transparent Ethernet-FCS tap on the 32-bit MAC stream that stalls only on a pending result",
+      "goal": "Write the Overview. The block observes a 32-bit valid/ready byte stream and never alters its data, keep or last. It computes the reflected CRC-32 FCS at one word per clock and emits one 32-bit result per frame, with status bits, through a single registered result slot. It back-pressures the stream only while that slot is occupied and not being drained, per the Q1 answer. State the TX (append) and RX (compare / residue_ok) use cases.",
+      "spec_evidence": [
+        {
+          "section": "P2",
+          "quote": "we need a CRC block that can sit on the receive and transmit data paths"
+        },
+        {
+          "section": "P5",
+          "quote": "shouldn't modify the data stream; it just watches it, so it can be used as a \"tap\"."
+        },
+        {
+          "section": "P5",
+          "quote": "own valid/ready so the TX side can append it and the RX side can compare it."
+        }
+      ],
+      "decisions": [
+        {
+          "id": "D1",
+          "topic": "Tap behaviour: purely passive snoop vs data-transparent tap that can stall",
+          "options": [
+            "Purely passive snoop that never affects tready (needs result buffering and a drop policy)",
+            "Data-transparent tap that never modifies data/keep/last but withholds ready while its single result slot is full and undrained"
+          ],
+          "status": "decided",
+          "choice": "Data-transparent tap. Data, keep and last are never modified. The block holds one registered result slot. If that slot is still pending when a new beat arrives, last or not, the block deasserts its ready and the stream stalls. Results are never dropped.",
+          "rationale": "The user's Q1 answer: single registered result slot, s_ready deasserts while a result is pending, no FIFO, no drop. This still honours P5's requirement not to modify the data stream.",
+          "impact": "high",
+          "confidence": "high",
+          "question": ""
+        }
+      ],
+      "depends_on": [],
+      "output_section": [
+        "Overview"
+      ],
+      "done_when": [
+        "Overview names both use cases: TX appends crc_data, RX uses residue_ok or crc_data",
+        "Overview states the data stream is never modified and is stalled only while an unconsumed result is pending",
+        "Throughput (1 word/clk, no inter-frame bubbles when the consumer reads the result promptly) and the 312.5 MHz target are stated up front"
+      ]
+    },
+    {
+      "id": "S2",
+      "title": "Define stream ports, stall/ready coupling, and the CRC result channel with residue_ok and error bits",
+      "goal": "Write the Interface and Parameters sections. Decide how the block sits on the stream, given that it must now drive a ready. List the result channel: crc_valid, crc_ready, crc_data[31:0], residue_ok and a per-frame error bit. List any sticky error output. Decide what is fixed and what is parameterised.",
+      "spec_evidence": [
+        {
+          "section": "P3",
+          "quote": "The data path inside the MAC is 32 bits wide, using an AXI-Stream-like valid/ready handshake."
+        },
+        {
+          "section": "P3",
+          "quote": "On the last word of a frame we get a 4-bit byte-enable telling"
+        },
+        {
+          "section": "P5",
+          "quote": "give us the final 32-bit CRC with its"
+        }
+      ],
+      "decisions": [
+        {
+          "id": "D12",
+          "topic": "Physical placement of the stall: in-line pass-through vs off-path snoop with a stall output",
+          "options": [
+            "In-line combinational pass-through: s_axis in, m_axis out, data/keep/last wired straight through, m_tvalid = s_tvalid && slot_free, s_tready = m_tready && slot_free",
+            "Off-path snoop inputs plus a 'crc_stall'/ready output that the MAC must AND into its own handshake"
+          ],
+          "status": "defaulted",
+          "choice": "In-line combinational pass-through with no data registers. The only gating is slot_free = !crc_valid || crc_ready, applied to both m_tvalid and s_tready, so upstream and downstream always agree on which beats were transferred.",
+          "rationale": "Gating both valid and ready inside the block guarantees that the CRC sees exactly the beats the sink accepts. Integration cannot get the AND wrong, and data is still not modified or delayed.",
+          "impact": "medium",
+          "confidence": "medium",
+          "question": "Should the CRC block sit in-line as a zero-latency pass-through (s_axis in, m_axis out, data unchanged, valid/ready gated while a CRC result is pending), or stay off the data path with snoop inputs and a separate stall output that the MAC combines into its own handshake?"
+        },
+        {
+          "id": "D2",
+          "topic": "Data width parameterisation",
+          "options": [
+            "Fixed 32-bit data / 4-bit keep",
+            "Parameterised DATA_W with matrices generated by functions"
+          ],
+          "status": "defaulted",
+          "choice": "Fixed 32-bit data and 4-bit keep. Write the XOR-matrix generation as a synthesizable function so the width can be widened later without changing the architecture.",
+          "rationale": "The spec only gives 32 bits. A generic width adds verification cost now for no stated need.",
+          "impact": "low",
+          "confidence": "medium",
+          "question": "Should the CRC block be parameterised for other data widths (e.g. 64-bit), or is a fixed 32-bit datapath enough?"
+        }
+      ],
+      "depends_on": [
+        "S1"
+      ],
+      "output_section": [
+        "Interface",
+        "Parameters"
+      ],
+      "done_when": [
+        "Port table lists every signal with direction, width and meaning, including the gated ready/valid and the result channel",
+        "The result channel carries crc_data, residue_ok and the per-frame error bit in a single valid/ready handshake, with no overflow flag",
+        "Parameters table lists localparams for polynomial, preset, final XOR and residue constant"
+      ]
+    },
+    {
+      "id": "S3",
+      "title": "Pin down the reflected CRC-32 bit/byte mapping and the result format",
+      "goal": "Specify how tdata bytes and bits feed the CRC register, given byte 0 in [7:0] and reflected input. Specify how the final register maps to the 32-bit output, so that \"123456789\" yields 0xCBF43926 and TX can drop the result directly onto the wire.",
+      "spec_evidence": [
+        {
+          "section": "P4",
+          "quote": "polynomial 0x04C11DB7, register preset to all ones,"
+        },
+        {
+          "section": "P4",
+          "quote": "reflected in and out like the 802.3 spec, and the result inverted at the end."
+        },
+        {
+          "section": "P4",
+          "quote": "should produce 0xCBF43926"
+        },
+        {
+          "section": "P3",
+          "quote": "Byte 0 of a frame is in bits [7:0] of the first word, byte 1 in [15:8], and so on."
+        }
+      ],
+      "decisions": [
+        {
+          "id": "D3",
+          "topic": "Result data format on the CRC output",
+          "options": [
+            "Standard CRC value (0xCBF43926 convention); its LSB byte is the first FCS byte on the wire when placed in [7:0]",
+            "Byte-swapped or bit-reversed raw register"
+          ],
+          "status": "defaulted",
+          "choice": "Output the standard inverted, reflected CRC value. crc_data[7:0] is the first FCS byte transmitted, which matches the stream's little-endian byte order.",
+          "rationale": "This matches the spec's check value and the stream's byte ordering, so TX can append the result as one word and RX can compare it word-for-word.",
+          "impact": "medium",
+          "confidence": "high",
+          "question": "Should the CRC output be the standard value (e.g. 0xCBF43926 for \"123456789\") with bits [7:0] being the first FCS byte on the wire?"
+        }
+      ],
+      "depends_on": [
+        "S1"
+      ],
+      "output_section": [
+        "Datapath",
+        "Overview"
+      ],
+      "done_when": [
+        "The doc gives an explicit equation or mapping from tdata bits to the reflected LFSR input",
+        "The \"123456789\" \u2192 0xCBF43926 check is worked through as a 9-byte frame split into 3 words (keep 1111, 1111, 0001)",
+        "Byte order of the result relative to the wire is stated"
+      ]
+    },
+    {
+      "id": "S4",
+      "title": "Design the single-cycle 32-bit parallel CRC datapath with partial-word last beat and SOF preset",
+      "goal": "Write the Datapath section. Cover the CRC state register, the parallel next-state logic for 4/3/2/1 valid bytes, preset injection on the first word of a frame, the final inversion, the residue compare, and capture into the single result slot.",
+      "spec_evidence": [
+        {
+          "section": "P5",
+          "quote": "We need to process a full word every clock with no bubbles between frames, because the MAC"
+        },
+        {
+          "section": "P3",
+          "quote": "only see 0001, 0011, 0111 or 1111 there"
+        },
+        {
+          "section": "P3",
+          "quote": "any length from 1 byte upward"
+        }
+      ],
+      "decisions": [
+        {
+          "id": "D4",
+          "topic": "Partial last-word CRC computation",
+          "options": [
+            "Four parallel update matrices (8/16/24/32-bit) from the same state, selected by tkeep",
+            "32-bit update followed by a reverse-shift correction",
+            "Byte-serial over multiple cycles for the tail"
+          ],
+          "status": "defaulted",
+          "choice": "Compute four parallel update matrices (1-4 bytes) from the current state in the same cycle and select one with the decoded tkeep on the last beat. Non-last beats always use the 32-bit matrix.",
+          "rationale": "Keeps one word per clock with no tail cycles. Each matrix is a shallow XOR tree that fits 312.5 MHz and ports to ASIC.",
+          "impact": "medium",
+          "confidence": "high",
+          "question": "Is it acceptable to use four parallel CRC update matrices (one per valid-byte count) selected by the byte-enable, at the cost of extra XOR area?"
+        },
+        {
+          "id": "D5",
+          "topic": "Back-to-back frame state handling",
+          "options": [
+            "Mux the all-ones preset into the state input when the beat is a start-of-frame (no idle cycle)",
+            "Reset the state register in a separate cycle after tlast"
+          ],
+          "status": "decided",
+          "choice": "An SOF flag is set at reset and after every tlast beat. On an SOF beat the update uses 0xFFFFFFFF as the current state, so a new frame can start the cycle right after the previous tlast.",
+          "rationale": "The spec requires no bubbles between back-to-back frames.",
+          "impact": "medium",
+          "confidence": "high",
+          "question": ""
+        }
+      ],
+      "depends_on": [
+        "S3"
+      ],
+      "output_section": [
+        "Datapath",
+        "Block Diagram"
+      ],
+      "done_when": [
+        "The block diagram shows the pass-through wires, slot_free gating, state register, preset mux, four update matrices, keep-select mux, inverter, residue comparator and the single result register",
+        "A 1-byte single-beat frame (SOF and tlast on the same beat, keep=0001) is handled",
+        "The keep-to-matrix-select mapping is tabulated"
+      ]
+    },
+    {
+      "id": "S5",
+      "title": "Define beat qualification, frame tracking and result-slot control",
+      "goal": "Write the Control Logic section. A beat qualifies only when s_tvalid && s_tready, where s_tready already includes slot_free. Cover SOF/in-frame tracking, the error accumulator, loading the result slot on a tlast beat, and clearing it on crc_valid && crc_ready.",
+      "spec_evidence": [
+        {
+          "section": "P3",
+          "quote": "Every other word is always fully populated."
+        },
+        {
+          "section": "P5",
+          "quote": "streams back-to-back frames."
+        }
+      ],
+      "decisions": [],
+      "depends_on": [
+        "S2",
+        "S4"
+      ],
+      "output_section": [
+        "Control Logic"
+      ],
+      "done_when": [
+        "Control state (SOF flag, per-frame error accumulator, result-slot valid) is enumerated with update rules per qualifying beat",
+        "The doc states that non-qualifying cycles (valid low, downstream ready low, or slot not free) leave CRC state unchanged",
+        "The slot equations are written out: load on a qualifying tlast beat, clear on crc_ready, and simultaneous drain+load in the same cycle allowed"
+      ]
+    },
+    {
+      "id": "S6",
+      "title": "Specify the single-slot result channel and the stall it imposes on the stream",
+      "goal": "Define the result-channel handshake and the stall rule from the Q1 answer. There is one registered slot and no FIFO or drop. While the slot holds an unconsumed result, every new beat waits, last or not. Show that with a prompt consumer (crc_ready high when the result appears) back-to-back frames see no bubbles. Note the optional register slice for consumers that need full decoupling.",
+      "spec_evidence": [
+        {
+          "section": "P5",
+          "quote": "give us the final 32-bit CRC with its"
+        },
+        {
+          "section": "P5",
+          "quote": "streams back-to-back frames."
+        },
+        {
+          "section": "P7",
+          "quote": "but don't hang."
+        }
+      ],
+      "decisions": [
+        {
+          "id": "D6",
+          "topic": "Result-channel buffering and backpressure policy",
+          "options": [
+            "Small FIFO plus sticky overflow flag; drop results on overflow",
+            "Single registered result slot; stall the stream while the result is pending",
+            "Assume the consumer is always ready"
+          ],
+          "status": "decided",
+          "choice": "Single registered result slot with slot_free = !crc_valid || crc_ready. When the slot is not free, the stream is stalled for every beat. Results are never dropped, so there is no overflow flag. An external register slice on the result channel is the documented option for full decoupling.",
+          "rationale": "User answer to Q1.",
+          "impact": "high",
+          "confidence": "high",
+          "question": ""
+        }
+      ],
+      "depends_on": [
+        "S2",
+        "S5"
+      ],
+      "output_section": [
+        "Control Logic",
+        "Interface",
+        "Corner Cases & Error Handling"
+      ],
+      "done_when": [
+        "The doc proves no bubble occurs for back-to-back frames, including consecutive 1-word frames, when crc_ready is high in the cycle crc_valid rises",
+        "The doc describes stall behaviour when crc_ready is held low, and shows the stream resumes the cycle crc_ready returns",
+        "The combinational crc_ready \u2192 s_tready/m_tvalid path is called out for integration and timing"
+      ]
+    },
+    {
+      "id": "S7",
+      "title": "Specify RX FCS handling via the residue_ok flag over data+FCS",
+      "goal": "Document that the CRC runs over every observed byte, including the received FCS on RX. residue_ok is set when that CRC equals the 802.3 good-frame residue, so no lookahead or delay line is needed. Explain the TX and RX usage.",
+      "spec_evidence": [
+        {
+          "section": "P5",
+          "quote": "own valid/ready so the TX side can append it and the RX side can compare it."
+        },
+        {
+          "section": "P2",
+          "quote": "compute the Ethernet FCS on the fly"
+        }
+      ],
+      "decisions": [
+        {
+          "id": "D7",
+          "topic": "RX handling of in-stream FCS bytes",
+          "options": [
+            "Compute over all observed bytes; also output a residue_ok flag",
+            "Mode input that excludes the last 4 bytes, using a one-word delay line",
+            "Assume RX strips the FCS before the tap"
+          ],
+          "status": "decided",
+          "choice": "Compute the CRC over every observed byte. Output a residue_ok status bit on the result channel that is true when the CRC over data+FCS equals the 802.3 good-frame residue (0x2144DF1C in the inverted-output convention, 0xDEBB20E3 on the raw register). RX may use residue_ok or compare against a separately extracted FCS.",
+          "rationale": "User answer to Q2.",
+          "impact": "high",
+          "confidence": "high",
+          "question": ""
+        }
+      ],
+      "depends_on": [
+        "S3",
+        "S4"
+      ],
+      "output_section": [
+        "Datapath",
+        "Interface",
+        "Overview"
+      ],
+      "done_when": [
+        "The residue constant is stated in the same bit convention as crc_data, and it is noted whether the compare uses the pre- or post-inversion value",
+        "The doc explains that TX ignores residue_ok and that RX ignores crc_data if it relies on residue_ok"
+      ]
+    },
+    {
+      "id": "S8",
+      "title": "Close timing at 312.5 MHz and fix result latency",
+      "goal": "Write the Timing & Pipeline section. Identify the critical paths: the CRC loop (state \u2192 matrix \u2192 keep mux \u2192 state) and the combinational crc_ready \u2192 slot_free \u2192 s_tready/m_tvalid path. Estimate XOR depth on UltraScale+ 6-LUTs and on ASIC. State that the result appears 1 cycle after the tlast beat.",
+      "spec_evidence": [
+        {
+          "section": "P6",
+          "quote": "Target clock is 312.5 MHz on an UltraScale+ part."
+        },
+        {
+          "section": "P6",
+          "quote": "We'd like to reuse the block on ASIC later."
+        }
+      ],
+      "decisions": [
+        {
+          "id": "D8",
+          "topic": "Result latency and pipelining",
+          "options": [
+            "Unpipelined state loop; result registered and valid 1 cycle after the tlast beat",
+            "Pipelined data pre-processing, adding latency",
+            "Combinational result in the same cycle as tlast"
+          ],
+          "status": "defaulted",
+          "choice": "Keep the state loop single-cycle and register the inverted result and status into the result slot, so crc_valid asserts 1 cycle after the tlast beat. Data-side pre-registering is an allowed fallback if timing fails. It would add latency and move the stall point, and the doc must describe that.",
+          "rationale": "The 32-bit CRC loop is a few LUT levels and should meet 3.2 ns. A registered result gives clean timing to the consumer and matches the single registered slot.",
+          "impact": "medium",
+          "confidence": "medium",
+          "question": "Is a 1-cycle latency from the last data beat to crc_valid acceptable to the TX/RX logic, and would 2 cycles also be tolerable if timing requires it?"
+        },
+        {
+          "id": "D9",
+          "topic": "Implementation portability",
+          "options": [
+            "Pure generic RTL (no vendor primitives)",
+            "Use UltraScale+ specific primitives/attributes"
+          ],
+          "status": "defaulted",
+          "choice": "Pure generic synthesizable RTL with no vendor primitives.",
+          "rationale": "Required for ASIC reuse (P6). XOR trees infer well on both targets.",
+          "impact": "low",
+          "confidence": "high",
+          "question": "Is it acceptable to forbid FPGA vendor primitives so the block ports directly to ASIC?"
+        }
+      ],
+      "depends_on": [
+        "S4",
+        "S6"
+      ],
+      "output_section": [
+        "Timing & Pipeline"
+      ],
+      "done_when": [
+        "A cycle-by-cycle timing diagram shows back-to-back frames including a 1-word frame, the result appearing one cycle after each tlast, and a stall case with crc_ready held low",
+        "Both critical paths are identified with estimated logic levels and a fallback (pre-registered data terms, external result register slice)"
+      ]
+    },
+    {
+      "id": "S9",
+      "title": "Specify synchronous active-low reset and single-clock domain",
+      "goal": "Write the Clocking & Reset section: one clock, synchronous active-low reset, and reset values for the SOF flag, CRC state, result-slot valid and error flags. Cover the ready/valid gating during reset and a stream that is mid-frame when reset releases.",
+      "spec_evidence": [
+        {
+          "section": "P6",
+          "quote": "Reset is synchronous active-low like the rest of the MAC."
+        }
+      ],
+      "decisions": [
+        {
+          "id": "D10",
+          "topic": "Reset style",
+          "options": [
+            "Synchronous active-low on all control flops",
+            "Asynchronous assert / synchronous deassert"
+          ],
+          "status": "decided",
+          "choice": "Synchronous active-low reset on all control state (SOF flag, result-slot valid, sticky/per-frame errors). Pure datapath flops (CRC state, crc_data) may be left unreset.",
+          "rationale": "Stated directly in P6.",
+          "impact": "low",
+          "confidence": "high",
+          "question": ""
+        }
+      ],
+      "depends_on": [
+        "S5",
+        "S6"
+      ],
+      "output_section": [
+        "Clocking & Reset"
+      ],
+      "done_when": [
+        "Each stateful element has a listed reset value or an explicit 'no reset' entry",
+        "The doc defines that a partial frame seen after reset release is treated as a new frame starting at the first qualifying beat",
+        "The values of crc_valid and the slot_free gating during reset are stated"
+      ]
+    },
+    {
+      "id": "S10",
+      "title": "Enumerate malformed-input and stall corner cases with a non-hanging error policy",
+      "goal": "Write the Corner Cases section. Cover illegal last-beat keep (0000, non-packed patterns), keep\u22601111 on non-last beats, 1-byte frames, back-to-back single-word frames, mid-frame stalls from either side, and crc_ready held low indefinitely. Give the reporting mechanism for each and show the block cannot deadlock.",
+      "spec_evidence": [
+        {
+          "section": "P7",
+          "quote": "If something is malformed (for example a weird byte-enable), flag it somehow, but don't hang."
+        },
+        {
+          "section": "P3",
+          "quote": "only see 0001, 0011, 0111 or 1111 there"
+        }
+      ],
+      "decisions": [
+        {
+          "id": "D11",
+          "topic": "Malformed byte-enable policy",
+          "options": [
+            "Flag a per-frame error bit on the result channel; compute with a defined fallback byte count; still end the frame on tlast",
+            "Drop the frame's result entirely",
+            "Assert a separate sticky error output only"
+          ],
+          "status": "defaulted",
+          "choice": "Still end the frame on tlast and emit a result with a per-frame error bit set. Use a deterministic fallback byte count, defined by the MA writer. Also raise a sticky error output for the MAC status logic.",
+          "rationale": "Satisfies 'flag it' and 'don't hang'. It keeps exactly one result per frame, which the no-drop single-slot policy relies on.",
+          "impact": "medium",
+          "confidence": "medium",
+          "question": "When a malformed byte-enable is seen, should the block still output a CRC for that frame with an error bit set, or suppress the result and only raise an error flag?"
+        }
+      ],
+      "depends_on": [
+        "S5",
+        "S6",
+        "S7"
+      ],
+      "output_section": [
+        "Corner Cases & Error Handling"
+      ],
+      "done_when": [
+        "A table lists each anomaly with detection logic, CRC value produced, flags set and recovery",
+        "The doc argues that no input pattern deadlocks the block: a stall persists only while crc_ready is low, and a malformed frame cannot corrupt the next frame's preset",
+        "The doc states that the only stall source is a pending result owned by the consumer"
+      ]
+    },
+    {
+      "id": "S11",
+      "title": "Build a verification plan anchored on the 0xCBF43926 check, a byte-serial reference model and stall behaviour",
+      "goal": "Write the Verification Plan. Include a bit-serial reference CRC model and directed tests: \"123456789\", 1-4 byte frames, every keep value, and a good-FCS residue frame. Add random back-to-back frames with random source valid, downstream ready and crc_ready, malformed-keep injection and reset mid-frame.",
+      "spec_evidence": [
+        {
+          "section": "P4",
+          "quote": "A good sanity check is that the ASCII string \"123456789\" should produce 0xCBF43926."
+        },
+        {
+          "section": "P5",
+          "quote": "no bubbles between frames"
+        }
+      ],
+      "decisions": [],
+      "depends_on": [
+        "S3",
+        "S6",
+        "S7",
+        "S10"
+      ],
+      "output_section": [
+        "Verification Plan"
+      ],
+      "done_when": [
+        "Directed, random and error tests are listed with pass criteria",
+        "Coverage points include each keep value, frame length mod 4, SOF on the cycle after tlast, slot drained and reloaded in the same cycle, and stall while the result is pending",
+        "Assertions are listed: exactly one result per tlast with no drops; m_tdata/tkeep/tlast equal s_*; m_tvalid&&m_tready equals s_tvalid&&s_tready; no transfer while the slot is not free; crc_data stable while crc_valid && !crc_ready; a zero-bubble check when crc_ready is held high"
+      ]
+    },
+    {
+      "id": "S12",
+      "title": "Record assumptions and remaining open questions on placement, latency, format and errors",
+      "goal": "Write the Assumptions & Open Questions section from the remaining defaulted decisions (D2, D3, D4, D8, D9, D11, D12), stating what changes if each answer differs. Record the settled answers (D6 single slot with stall, D7 residue_ok) as assumptions made by the MAC team.",
+      "spec_evidence": [
+        {
+          "section": "P7",
+          "quote": "flag it somehow, but don't hang."
+        },
+        {
+          "section": "P5",
+          "quote": "The block"
+        }
+      ],
+      "decisions": [],
+      "depends_on": [
+        "S2",
+        "S6",
+        "S7",
+        "S8",
+        "S10"
+      ],
+      "output_section": [
+        "Assumptions & Open Questions"
+      ],
+      "done_when": [
+        "Every defaulted decision appears with its assumption and the design impact if it is overturned",
+        "The assumption that the consumer normally takes the result in the cycle it appears (otherwise the stream stalls) is recorded, with the register-slice option",
+        "The doc records that the block now drives the stream handshake, so it is not a purely passive tap"
+      ]
+    }
+  ],
+  "assumptions": [
+    {
+      "decision_id": "D12",
+      "topic": "Physical placement of the stall: in-line pass-through vs off-path snoop with a stall output",
+      "assumed": "In-line combinational pass-through with no data registers. The only gating is slot_free = !crc_valid || crc_ready, applied to both m_tvalid and s_tready, so upstream and downstream always agree on which beats were transferred.",
+      "impact": "medium",
+      "confidence": "medium",
+      "question": "Should the CRC block sit in-line as a zero-latency pass-through (s_axis in, m_axis out, data unchanged, valid/ready gated while a CRC result is pending), or stay off the data path with snoop inputs and a separate stall output that the MAC combines into its own handshake?"
+    },
+    {
+      "decision_id": "D2",
+      "topic": "Data width parameterisation",
+      "assumed": "Fixed 32-bit data and 4-bit keep. Write the XOR-matrix generation as a synthesizable function so the width can be widened later without changing the architecture.",
+      "impact": "low",
+      "confidence": "medium",
+      "question": "Should the CRC block be parameterised for other data widths (e.g. 64-bit), or is a fixed 32-bit datapath enough?"
+    },
+    {
+      "decision_id": "D3",
+      "topic": "Result data format on the CRC output",
+      "assumed": "Output the standard inverted, reflected CRC value. crc_data[7:0] is the first FCS byte transmitted, which matches the stream's little-endian byte order.",
+      "impact": "medium",
+      "confidence": "high",
+      "question": "Should the CRC output be the standard value (e.g. 0xCBF43926 for \"123456789\") with bits [7:0] being the first FCS byte on the wire?"
+    },
+    {
+      "decision_id": "D4",
+      "topic": "Partial last-word CRC computation",
+      "assumed": "Compute four parallel update matrices (1-4 bytes) from the current state in the same cycle and select one with the decoded tkeep on the last beat. Non-last beats always use the 32-bit matrix.",
+      "impact": "medium",
+      "confidence": "high",
+      "question": "Is it acceptable to use four parallel CRC update matrices (one per valid-byte count) selected by the byte-enable, at the cost of extra XOR area?"
+    },
+    {
+      "decision_id": "D8",
+      "topic": "Result latency and pipelining",
+      "assumed": "Keep the state loop single-cycle and register the inverted result and status into the result slot, so crc_valid asserts 1 cycle after the tlast beat. Data-side pre-registering is an allowed fallback if timing fails. It would add latency and move the stall point, and the doc must describe that.",
+      "impact": "medium",
+      "confidence": "medium",
+      "question": "Is a 1-cycle latency from the last data beat to crc_valid acceptable to the TX/RX logic, and would 2 cycles also be tolerable if timing requires it?"
+    },
+    {
+      "decision_id": "D9",
+      "topic": "Implementation portability",
+      "assumed": "Pure generic synthesizable RTL with no vendor primitives.",
+      "impact": "low",
+      "confidence": "high",
+      "question": "Is it acceptable to forbid FPGA vendor primitives so the block ports directly to ASIC?"
+    },
+    {
+      "decision_id": "D11",
+      "topic": "Malformed byte-enable policy",
+      "assumed": "Still end the frame on tlast and emit a result with a per-frame error bit set. Use a deterministic fallback byte count, defined by the MA writer. Also raise a sticky error output for the MAC status logic.",
+      "impact": "medium",
+      "confidence": "medium",
+      "question": "When a malformed byte-enable is seen, should the block still output a CRC for that frame with an error bit set, or suppress the result and only raise an error flag?"
+    }
+  ]
+}

@@ -1,0 +1,636 @@
+{
+  "steps": [
+    {
+      "id": "S1",
+      "title": "Frame the controller: 32 mixed edge/level sources merged into one nesting-aware irq for an RV32 core",
+      "goal": "Write the Overview. Cover the controller's role: a per-source gateway, priority/threshold arbitration, a claim/complete handshake with 7-level nesting, and a level irq to the core. State what is out of scope (vectoring, multiple targets).",
+      "spec_evidence": [
+        {
+          "section": "P2",
+          "quote": "The core has a single external interrupt input."
+        },
+        {
+          "section": "P2",
+          "quote": "We need a controller that merges 32 peripheral"
+        },
+        {
+          "section": "P6",
+          "quote": "While an ISR runs, only strictly higher-priority interrupts may preempt it."
+        },
+        {
+          "section": "P8",
+          "quote": "The output to the core is a level `irq` that stays high while there is a claimable interrupt."
+        }
+      ],
+      "decisions": [],
+      "depends_on": [],
+      "output_section": [
+        "Overview"
+      ],
+      "done_when": [
+        "The Overview names the four functional blocks: source gateway, arbiter, claim/complete with in-service tracker, and register file.",
+        "The Overview states a single target/context, no hardware vectoring, and that software reads {VALID, ID} via CLAIM.",
+        "The Overview lists the external guarantees: priority 0 never interrupts, ties go to the lower ID, only strictly higher priority preempts, and COMPLETE is matched by the stored ID per level."
+      ]
+    },
+    {
+      "id": "S2",
+      "title": "Pin down the 'simple bus' slave port, top-level ports and parameters",
+      "goal": "Define every port: clk, reset, src[31:0], irq and the bus slave signals. Fix the read/write handshake so that the CLAIM read side effect and the 1-cycle registered read are unambiguous.",
+      "spec_evidence": [
+        {
+          "section": "P7",
+          "quote": "32-bit simple bus, word-aligned, 1-cycle registered read"
+        },
+        {
+          "section": "P3",
+          "quote": "32 inputs, `src[31:0]`."
+        },
+        {
+          "section": "P8",
+          "quote": "Clock is 100 MHz"
+        }
+      ],
+      "decisions": [
+        {
+          "id": "D1",
+          "topic": "Bus slave protocol",
+          "options": [
+            "Single-cycle request (sel, we, addr, wdata) with rdata valid exactly one cycle after a read request, no wait states, no error response",
+            "APB-style psel/penable two-phase with pready/pslverr",
+            "Request/valid handshake with backpressure"
+          ],
+          "status": "defaulted",
+          "choice": "Single-cycle request (sel, we, addr[word], wdata) with no byte enables. Writes take effect at the clock edge. rdata is registered and valid one cycle after a read request. No wait states and no error response.",
+          "rationale": "This fits 'simple bus' and '1-cycle registered read'. Byte enables add no value for these registers. A fixed-latency read makes the CLAIM side effect happen on exactly one known cycle.",
+          "impact": "medium",
+          "confidence": "medium",
+          "question": "What exactly is the 'simple bus'? Is it a single-cycle sel/we/addr/wdata request with rdata one cycle later and no wait states, byte enables or error response? Or is it APB or another protocol?"
+        }
+      ],
+      "depends_on": [
+        "S1"
+      ],
+      "output_section": [
+        "Interface",
+        "Parameters"
+      ],
+      "done_when": [
+        "The port table lists name, direction, width and description for every signal, including irq as a registered output.",
+        "Read timing is drawn: request in cycle N, rdata in N+1, and the CLAIM side effect committed at the end of cycle N.",
+        "Behaviour for unmapped addresses (read 0, write ignored) and for partial/unaligned accesses (not supported) is stated.",
+        "Parameters are listed: NUM_SRC=32 (fixed), PRIO_BITS=3, SYNC_STAGES=2, plus a per-source async mask if D2 changes."
+      ]
+    },
+    {
+      "id": "S3",
+      "title": "Design the per-source gateway: CDC synchronizer, rising-edge detector, edge/level pending",
+      "goal": "Specify how each src bit becomes a pending bit. Async GPIO pins must be synchronized, single-cycle pulses must be latched in edge mode, and level-mode pending must track the synchronized line.",
+      "spec_evidence": [
+        {
+          "section": "P3",
+          "quote": "so they are not synchronous to our clock."
+        },
+        {
+          "section": "P3",
+          "quote": "Some peripherals (timers, GPIO) produce single-cycle"
+        },
+        {
+          "section": "P3",
+          "quote": "edge-triggered (rising edge) or level-triggered (active high)"
+        },
+        {
+          "section": "P5",
+          "quote": "Edge interrupts should be cleared by the claim; level interrupts"
+        },
+        {
+          "section": "P5",
+          "quote": "stay pending as long as the line is high."
+        }
+      ],
+      "decisions": [
+        {
+          "id": "D2",
+          "topic": "Which sources get a synchronizer",
+          "options": [
+            "2-flop synchronizer on all 32 sources",
+            "Synchronizer only on sources selected by a parameter mask, so synchronous sources save 2 cycles",
+            "Async edge-capture flop for pin sources plus synchronizer"
+          ],
+          "status": "defaulted",
+          "choice": "A 2-flop synchronizer on all 32 sources. Async pin pulses must be at least about 1.5 clock periods wide to be detected.",
+          "rationale": "We do not know which source indices are pins, so synchronizing all of them is safe. The 2-cycle cost still fits 'a few cycles'. Pin pulses narrower than a clock would need async capture, which complicates CDC and reset.",
+          "impact": "medium",
+          "confidence": "medium",
+          "question": "Can we synchronize all 32 inputs (+2 cycles latency), or should only specific GPIO pin indices be synchronized? Can async pin pulses be shorter than about 15 ns?"
+        },
+        {
+          "id": "D3",
+          "topic": "Does an edge latch pending while the source is disabled",
+          "options": [
+            "Pending captures edges regardless of enable; enable only gates arbitration",
+            "Edges are ignored while disabled"
+          ],
+          "status": "defaulted",
+          "choice": "Pending captures edges regardless of enable. Enable only gates arbitration and irq.",
+          "rationale": "This matches the PLIC-style gateway and lets software poll pending for masked sources. Stale edges can be dropped with the pending-clear mechanism.",
+          "impact": "low",
+          "confidence": "medium",
+          "question": "If an edge-triggered source fires while its enable bit is 0, should it be remembered as pending (and interrupt once enabled) or be discarded?"
+        }
+      ],
+      "depends_on": [
+        "S2"
+      ],
+      "output_section": [
+        "Datapath",
+        "Clocking & Reset"
+      ],
+      "done_when": [
+        "The per-source gateway is described: sync flops, delayed copy for edge detect, pending flop, and the mux by trigger type.",
+        "Edge-mode pending set/clear priority is defined for the same cycle: a new edge vs a claim clear vs a software clear (set wins).",
+        "Level-mode pending is defined as the synchronized line and is not latched.",
+        "Behaviour when the trigger type changes at runtime is specified, including clearing the stale edge pending."
+      ]
+    },
+    {
+      "id": "S4",
+      "title": "Lay out the register map, including the CLAIM {VALID, ID} format and COMPLETE semantics",
+      "goal": "Produce a word-aligned register map covering priority, enable, trigger, pending, pending-clear, threshold, CLAIM/COMPLETE and in-service debug. Give each register's access type, reset value and side effects.",
+      "spec_evidence": [
+        {
+          "section": "P7",
+          "quote": "Priority of each source (3 bits per source; pack them as you see fit)"
+        },
+        {
+          "section": "P7",
+          "quote": "Pending status (read-only), plus a way for software to clear a stuck edge pending bit"
+        },
+        {
+          "section": "P7",
+          "quote": "Claim (read) / Complete (write)"
+        },
+        {
+          "section": "P7",
+          "quote": "Something to let firmware see which levels are currently in service, for debug"
+        },
+        {
+          "section": "P5",
+          "quote": "Software reads a CLAIM register to get the ID of the highest-priority pending"
+        }
+      ],
+      "decisions": [
+        {
+          "id": "D4",
+          "topic": "Priority register packing",
+          "options": [
+            "8 sources per word, 4-bit nibble each (bit 3 reserved), 4 words",
+            "One word per source, 32 words",
+            "10 sources per word, 3-bit packed"
+          ],
+          "status": "defaulted",
+          "choice": "8 sources per word as 4-bit nibbles with bit 3 reserved (reads 0), giving 4 words.",
+          "rationale": "Nibble alignment makes the software index math trivial and avoids fields that straddle words, at a cost of only 4 registers.",
+          "impact": "low",
+          "confidence": "high",
+          "question": "Is packing priorities as 4-bit nibbles (8 sources per 32-bit word, top bit unused) acceptable?"
+        },
+        {
+          "id": "D5",
+          "topic": "CLAIM value when nothing is claimable",
+          "options": [
+            "Return 32 (0x20), since IDs 0..31 are all valid sources",
+            "Bit 31 = valid flag, bits[4:0] = ID",
+            "Renumber sources 1..32 and return 0 for none (PLIC style)"
+          ],
+          "status": "decided",
+          "choice": "CLAIM returns [31] VALID and [4:0] ID, and source IDs stay 0..31. When nothing is claimable the read returns 0 (VALID=0) and changes no state. Software must check VALID, because ID 0 is a real source. COMPLETE takes the ID from wdata[4:0].",
+          "rationale": "User answer Q2.",
+          "impact": "medium",
+          "confidence": "high",
+          "question": ""
+        },
+        {
+          "id": "D6",
+          "topic": "Software clear of stuck edge pending",
+          "options": [
+            "Separate write-1-to-clear PENDING_CLR register (PENDING stays read-only)",
+            "PENDING itself is W1C"
+          ],
+          "status": "defaulted",
+          "choice": "A separate W1C PENDING_CLR register. Clearing has no lasting effect on a level source whose line is high.",
+          "rationale": "This keeps PENDING strictly read-only as the spec states while still giving the requested clear mechanism.",
+          "impact": "low",
+          "confidence": "medium",
+          "question": "Is a separate write-1-to-clear PENDING_CLR register OK, or do you want PENDING itself to be write-1-to-clear?"
+        }
+      ],
+      "depends_on": [
+        "S2",
+        "S3"
+      ],
+      "output_section": [
+        "Interface",
+        "Datapath"
+      ],
+      "done_when": [
+        "A table lists offset, name, access type, field layout and reset value for every register.",
+        "The CLAIM field layout is given: [31] VALID, [30:5] reserved 0, [4:0] ID. An empty read returns 0x0 with no side effect.",
+        "CLAIM read side effects are listed for a valid claim: edge pending cleared, in-service level set, and ID stored.",
+        "COMPLETE write semantics are specified: the ID is taken from wdata[4:0], other bits are ignored, and behaviour follows S6.",
+        "The IN_SERVICE debug register (7 bits, one per level 1..7) is defined, plus optional read-only fields for running priority and per-level stored IDs."
+      ]
+    },
+    {
+      "id": "S5",
+      "title": "Build the 32-way priority/threshold arbiter with lowest-ID tie-break",
+      "goal": "Define the eligibility filter and the max-finding structure, and show they close timing at 100 MHz. Eligibility is pending & enable & prio>threshold & prio>running level.",
+      "spec_evidence": [
+        {
+          "section": "P4",
+          "quote": "A global threshold lets software ignore everything at or below a given"
+        },
+        {
+          "section": "P4",
+          "quote": "If two sources have the same priority, the lower-numbered source wins."
+        },
+        {
+          "section": "P4",
+          "quote": "Each source has a priority from 0 to 7, where 0 means \"never interrupt\" and 7 is"
+        },
+        {
+          "section": "P6",
+          "quote": "While an ISR runs, only strictly higher-priority interrupts may preempt it."
+        }
+      ],
+      "decisions": [
+        {
+          "id": "D7",
+          "topic": "Arbiter implementation",
+          "options": [
+            "Combinational binary compare tree (5 levels) with registered winner {valid, id, prio}",
+            "Two-stage pipelined tree",
+            "Per-priority-level one-hot pending vectors + priority encoder"
+          ],
+          "status": "defaulted",
+          "choice": "A combinational 5-level compare tree feeding a registered winner {valid, id, prio}. A strict > compare keeps the lower ID on ties. The winner register drives both irq and the CLAIM read data.",
+          "rationale": "Five levels of 3-bit compare-and-mux fit easily in 10 ns. One registered stage keeps latency low and gives CLAIM a stable value.",
+          "impact": "medium",
+          "confidence": "high",
+          "question": "Is a 1-cycle registered arbiter acceptable, or do you expect much higher clocks later that would justify a pipelined tree?"
+        },
+        {
+          "id": "D8",
+          "topic": "Threshold/nesting combination",
+          "options": [
+            "Effective threshold = max(THRESHOLD, current running priority); eligible iff prio > effective",
+            "Threshold only applies when no ISR is active"
+          ],
+          "status": "decided",
+          "choice": "A source is eligible iff pending & enable & prio != 0 & prio > THRESHOLD & prio > running priority. Running priority is the highest level L with isr_v[L] set.",
+          "rationale": "This follows the 'at or below' threshold text, the strictly-higher preemption rule, and Q1 (the effective threshold stays at the highest remaining in-service level).",
+          "impact": "medium",
+          "confidence": "high",
+          "question": ""
+        }
+      ],
+      "depends_on": [
+        "S3",
+        "S4"
+      ],
+      "output_section": [
+        "Datapath",
+        "Timing & Pipeline"
+      ],
+      "done_when": [
+        "The eligibility equation is written explicitly.",
+        "The tree structure and tie-break comparison are documented, with a critical-path estimate against the 10 ns period.",
+        "Stale-winner handling is defined: the winner register is invalidated in the cycle after a claim, so back-to-back CLAIM reads never return the same claim twice and an empty CLAIM returns 0."
+      ]
+    },
+    {
+      "id": "S6",
+      "title": "Design claim/complete and the 7-level in-service tracker with per-level stored IDs",
+      "goal": "Define how CLAIM records a level and ID, how COMPLETE clears the matching level by stored ID (in or out of order, even after priority reprogramming), and how running priority returns to the highest remaining level.",
+      "spec_evidence": [
+        {
+          "section": "P5",
+          "quote": "That also marks the interrupt as in service."
+        },
+        {
+          "section": "P5",
+          "quote": "the ID to a COMPLETE register."
+        },
+        {
+          "section": "P6",
+          "quote": "7 levels of nesting (one per priority level) must work, with each COMPLETE returning to the"
+        },
+        {
+          "section": "P6",
+          "quote": "previous level."
+        }
+      ],
+      "decisions": [
+        {
+          "id": "D9",
+          "topic": "In-service tracking structure and COMPLETE matching",
+          "options": [
+            "7-bit per-level in-service vector plus a 5-bit claimed-ID register per level; COMPLETE matches the ID",
+            "7-bit per-level vector only; COMPLETE clears the bit for the source's current priority",
+            "Per-source 32-bit in-service vector"
+          ],
+          "status": "decided",
+          "choice": "Use a 7-bit isr_v[7:1] plus a 5-bit isr_id[L] per level. CLAIM sets isr_v[prio] and stores isr_id[prio] using the priority captured at claim. COMPLETE clears isr_v[L] for the highest L where isr_v[L] is set and isr_id[L] equals the written ID. Out-of-order completes are allowed. The stored level is used even if the source's priority has since changed. If the same ID is in service at two levels, the higher level is cleared first. Running priority is the highest set isr_v bit.",
+          "rationale": "User answer Q1.",
+          "impact": "high",
+          "confidence": "high",
+          "question": ""
+        },
+        {
+          "id": "D10",
+          "topic": "COMPLETE with an ID that is not in service",
+          "options": [
+            "Ignore silently",
+            "Ignore and set a sticky error bit readable by software",
+            "Clear the top level regardless"
+          ],
+          "status": "decided",
+          "choice": "If no level matches, the write is ignored with no state change and no error flag.",
+          "rationale": "User answer Q1.",
+          "impact": "low",
+          "confidence": "high",
+          "question": ""
+        }
+      ],
+      "depends_on": [
+        "S4",
+        "S5"
+      ],
+      "output_section": [
+        "Control Logic",
+        "Datapath"
+      ],
+      "done_when": [
+        "The claim update is specified: set isr_v[winner.prio], write isr_id[winner.prio], and clear edge pending, all committed in the read-request cycle using the registered winner's prio.",
+        "The complete update is specified as a 7-way ID compare, an AND with isr_v, and a highest-match priority select, with the result for running priority.",
+        "Same-cycle interactions are resolved: a CLAIM read and a COMPLETE write cannot coincide on a single-port bus; claim vs a new edge on the same source is covered.",
+        "Sequence examples trace three nested levels with in-order unwinding, one out-of-order complete, and one case where the same ID is claimed at two levels after priority reprogramming."
+      ]
+    },
+    {
+      "id": "S7",
+      "title": "Assemble the block diagram and the source-to-irq latency budget",
+      "goal": "Draw the dataflow src -> sync -> edge -> pending -> eligibility -> tree -> winner register -> irq, plus the register file. Count cycles for 'a few cycles' and define irq timing after claim/complete.",
+      "spec_evidence": [
+        {
+          "section": "P8",
+          "quote": "Clock is 100 MHz; source-to-`irq` latency should be \"a few cycles\"."
+        },
+        {
+          "section": "P8",
+          "quote": "The output to the core is a level `irq` that stays high while there is a claimable interrupt."
+        }
+      ],
+      "decisions": [
+        {
+          "id": "D11",
+          "topic": "irq output timing",
+          "options": [
+            "irq = registered winner valid (glitch-free, deasserts the cycle after claim)",
+            "irq combinational from the eligibility OR"
+          ],
+          "status": "defaulted",
+          "choice": "irq is driven directly from the registered winner-valid flop. The documented latency from a synchronous edge to irq is about 4 cycles: 2 sync, 1 pending, 1 winner.",
+          "rationale": "This gives the core a glitch-free registered output within the 'few cycles' budget, and irq drops within 1-2 cycles of a claim.",
+          "impact": "medium",
+          "confidence": "high",
+          "question": "Is about 4 cycles from source edge to irq (with 2-flop sync), with irq dropping 1-2 cycles after CLAIM, acceptable?"
+        }
+      ],
+      "depends_on": [
+        "S3",
+        "S5",
+        "S6"
+      ],
+      "output_section": [
+        "Block Diagram",
+        "Timing & Pipeline"
+      ],
+      "done_when": [
+        "The block diagram shows every register stage, the isr_v/isr_id tracker and the bus register file.",
+        "A latency table covers: edge source, level source, irq deassert after claim, and re-assert after complete.",
+        "A waveform-style description shows that irq may stay high briefly after a claim and that firmware must check VALID on a spurious CLAIM."
+      ]
+    },
+    {
+      "id": "S8",
+      "title": "Define clock domain, reset style and reset values that keep the controller silent",
+      "goal": "Use a single 100 MHz domain apart from the src synchronizers. Choose the reset style and give reset values so that no interrupt fires out of reset.",
+      "spec_evidence": [
+        {
+          "section": "P8",
+          "quote": "Clock is 100 MHz"
+        },
+        {
+          "section": "P3",
+          "quote": "so they are not synchronous to our clock."
+        }
+      ],
+      "decisions": [
+        {
+          "id": "D12",
+          "topic": "Reset style",
+          "options": [
+            "Active-low async assert, sync deassert rst_n",
+            "Synchronous active-high reset"
+          ],
+          "status": "defaulted",
+          "choice": "Active-low rst_n with async assert and sync deassert; the deassert synchronizer is assumed external. All priorities, enables, pending, isr_v and THRESHOLD reset to 0. isr_id contents are don't-care while isr_v is 0.",
+          "rationale": "This is common practice in RV32 microcontroller SoCs, and priority 0 out of reset guarantees irq is low.",
+          "impact": "low",
+          "confidence": "medium",
+          "question": "Does the SoC use active-low asynchronous reset (rst_n) or synchronous reset for peripherals?"
+        }
+      ],
+      "depends_on": [
+        "S2",
+        "S3"
+      ],
+      "output_section": [
+        "Clocking & Reset"
+      ],
+      "done_when": [
+        "Clock domain crossings are listed (src only), with synchronizer depth and SDC/CDC notes.",
+        "The reset value of every register and state flop is listed.",
+        "The synchronizer and edge-detect flops at reset are defined so that a line already high at reset release does not create a spurious edge."
+      ]
+    },
+    {
+      "id": "S9",
+      "title": "Enumerate corner cases: races, reprogramming, empty claims, out-of-order and duplicate completes",
+      "goal": "Catalogue the hazardous scenarios and give the defined behaviour for each one.",
+      "spec_evidence": [
+        {
+          "section": "P7",
+          "quote": "Trigger type (1 bit per source: 1 = edge, 0 = level)"
+        },
+        {
+          "section": "P7",
+          "quote": "Enable mask (1 bit per source)"
+        },
+        {
+          "section": "P3",
+          "quote": "others (UART, SPI) hold a level until serviced"
+        }
+      ],
+      "decisions": [],
+      "depends_on": [
+        "S5",
+        "S6",
+        "S7"
+      ],
+      "output_section": [
+        "Corner Cases & Error Handling"
+      ],
+      "done_when": [
+        "Covers: an edge arriving in the same cycle as its claim; back-to-back CLAIMs; CLAIM with nothing pending (returns 0, no state change); COMPLETE of a non-claimed ID (ignored); a double COMPLETE (second ignored).",
+        "Covers: out-of-order COMPLETE (that level cleared, running priority = highest remaining); a priority changed while in service (stored level used); the same ID in service at two levels (highest cleared first).",
+        "Covers: enable or trigger changed while pending or in service; threshold raised above running work; a level line dropping before claim (CLAIM returns the next winner or VALID=0).",
+        "Covers: an async pulse narrower than the sync window, and an edge source re-firing during its own ISR."
+      ]
+    },
+    {
+      "id": "S10",
+      "title": "Verification plan with a reference model of pending, priority and per-level-ID nesting",
+      "goal": "Define the testbench architecture, scoreboard model, directed tests, random tests and coverage for this controller.",
+      "spec_evidence": [
+        {
+          "section": "P6",
+          "quote": "Up to"
+        },
+        {
+          "section": "P5",
+          "quote": "When the ISR is finished, software writes"
+        }
+      ],
+      "decisions": [],
+      "depends_on": [
+        "S6",
+        "S7",
+        "S9"
+      ],
+      "output_section": [
+        "Verification Plan"
+      ],
+      "done_when": [
+        "A cycle-tolerant reference model predicts the CLAIM {VALID, ID}, irq and isr_v/isr_id, including the highest-matching-level COMPLETE rule.",
+        "Directed tests cover: tie-break, threshold boundary, prio 0, ID 0 claimed with VALID=1 vs empty claim, edge vs level clearing, full 7-level nesting and unwind, out-of-order completes, pending clear, and every S9 corner case.",
+        "A constrained-random ISR-emulating driver includes async-jittered pin sources, random priority reprogramming and out-of-order completes.",
+        "Coverage includes priority x trigger x enable, nesting depth 0..7, complete order (in/out of order/unmatched) and same-cycle races.",
+        "Assertions check: irq implies a valid winner; CLAIM never returns an ineligible ID; an empty CLAIM changes no state; an unmatched COMPLETE changes no state; latency bound."
+      ]
+    },
+    {
+      "id": "S11",
+      "title": "Record assumptions and open questions",
+      "goal": "Collect every remaining defaulted decision and implicit assumption so the spec author can confirm them, and record the resolved Q1/Q2 answers.",
+      "spec_evidence": [
+        {
+          "section": "P7",
+          "quote": "32-bit simple bus, word-aligned, 1-cycle registered read"
+        },
+        {
+          "section": "P8",
+          "quote": "Clock is 100 MHz; source-to-`irq` latency should be \"a few cycles\"."
+        }
+      ],
+      "decisions": [],
+      "depends_on": [
+        "S1",
+        "S2",
+        "S3",
+        "S4",
+        "S5",
+        "S6",
+        "S7",
+        "S8",
+        "S9",
+        "S10"
+      ],
+      "output_section": [
+        "Assumptions & Open Questions"
+      ],
+      "done_when": [
+        "Each defaulted decision (D1, D2, D3, D4, D6, D7, D11, D12) appears with its chosen default and question.",
+        "The decided items from user answers (D5 CLAIM format, D9/D10 COMPLETE matching) are recorded as resolved.",
+        "Assumptions are stated: a single hart/context, the core masks globally via mstatus, no wake-from-sleep requirement, minimum async pulse width, and firmware checks VALID."
+      ]
+    }
+  ],
+  "assumptions": [
+    {
+      "decision_id": "D1",
+      "topic": "Bus slave protocol",
+      "assumed": "Single-cycle request (sel, we, addr[word], wdata) with no byte enables. Writes take effect at the clock edge. rdata is registered and valid one cycle after a read request. No wait states and no error response.",
+      "impact": "medium",
+      "confidence": "medium",
+      "question": "What exactly is the 'simple bus'? Is it a single-cycle sel/we/addr/wdata request with rdata one cycle later and no wait states, byte enables or error response? Or is it APB or another protocol?"
+    },
+    {
+      "decision_id": "D2",
+      "topic": "Which sources get a synchronizer",
+      "assumed": "A 2-flop synchronizer on all 32 sources. Async pin pulses must be at least about 1.5 clock periods wide to be detected.",
+      "impact": "medium",
+      "confidence": "medium",
+      "question": "Can we synchronize all 32 inputs (+2 cycles latency), or should only specific GPIO pin indices be synchronized? Can async pin pulses be shorter than about 15 ns?"
+    },
+    {
+      "decision_id": "D3",
+      "topic": "Does an edge latch pending while the source is disabled",
+      "assumed": "Pending captures edges regardless of enable. Enable only gates arbitration and irq.",
+      "impact": "low",
+      "confidence": "medium",
+      "question": "If an edge-triggered source fires while its enable bit is 0, should it be remembered as pending (and interrupt once enabled) or be discarded?"
+    },
+    {
+      "decision_id": "D4",
+      "topic": "Priority register packing",
+      "assumed": "8 sources per word as 4-bit nibbles with bit 3 reserved (reads 0), giving 4 words.",
+      "impact": "low",
+      "confidence": "high",
+      "question": "Is packing priorities as 4-bit nibbles (8 sources per 32-bit word, top bit unused) acceptable?"
+    },
+    {
+      "decision_id": "D6",
+      "topic": "Software clear of stuck edge pending",
+      "assumed": "A separate W1C PENDING_CLR register. Clearing has no lasting effect on a level source whose line is high.",
+      "impact": "low",
+      "confidence": "medium",
+      "question": "Is a separate write-1-to-clear PENDING_CLR register OK, or do you want PENDING itself to be write-1-to-clear?"
+    },
+    {
+      "decision_id": "D7",
+      "topic": "Arbiter implementation",
+      "assumed": "A combinational 5-level compare tree feeding a registered winner {valid, id, prio}. A strict > compare keeps the lower ID on ties. The winner register drives both irq and the CLAIM read data.",
+      "impact": "medium",
+      "confidence": "high",
+      "question": "Is a 1-cycle registered arbiter acceptable, or do you expect much higher clocks later that would justify a pipelined tree?"
+    },
+    {
+      "decision_id": "D11",
+      "topic": "irq output timing",
+      "assumed": "irq is driven directly from the registered winner-valid flop. The documented latency from a synchronous edge to irq is about 4 cycles: 2 sync, 1 pending, 1 winner.",
+      "impact": "medium",
+      "confidence": "high",
+      "question": "Is about 4 cycles from source edge to irq (with 2-flop sync), with irq dropping 1-2 cycles after CLAIM, acceptable?"
+    },
+    {
+      "decision_id": "D12",
+      "topic": "Reset style",
+      "assumed": "Active-low rst_n with async assert and sync deassert; the deassert synchronizer is assumed external. All priorities, enables, pending, isr_v and THRESHOLD reset to 0. isr_id contents are don't-care while isr_v is 0.",
+      "impact": "low",
+      "confidence": "medium",
+      "question": "Does the SoC use active-low asynchronous reset (rst_n) or synchronous reset for peripherals?"
+    }
+  ]
+}

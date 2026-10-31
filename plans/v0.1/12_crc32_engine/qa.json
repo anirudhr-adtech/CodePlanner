@@ -1,0 +1,16 @@
+[
+  {
+    "id": "Q1",
+    "decision_id": "D6",
+    "question": "Can the CRC consumer ever hold crc_ready low long enough for several frames to end? If so, how many pending results should we buffer, and should we drop and flag on overflow?",
+    "in_doc": true,
+    "answer": "No buffering FIFO and no drop-on-overflow. The block has a single registered result slot. The consumer (MAC TX/RX control) normally reads the result in the cycle it appears. If a result is still pending, s_ready deasserts and the stream stalls: the new beat waits, last or not. Results are never dropped, so no overflow flag is needed. If the consumer must be fully decoupled, a register slice can be added on the result channel."
+  },
+  {
+    "id": "Q2",
+    "decision_id": "D7",
+    "question": "On RX, does the stream the CRC block sees still contain the 4 received FCS bytes? If so, is a 'residue good' flag acceptable, or must the block compute the CRC excluding those last 4 bytes?",
+    "in_doc": false,
+    "answer": "Use the default: Compute the CRC over every observed byte. Add a residue_ok status bit on the result channel that is true when the CRC over data+FCS equals the 802.3 good-frame residue. The RX side can use residue_ok or compare against a separately extracted FCS."
+  }
+]

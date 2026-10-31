@@ -1,0 +1,23 @@
+[
+  {
+    "id": "Q1",
+    "decision_id": "D6",
+    "question": "If a locked owner drops req in the cycle after asserting lock, should the arbiter immediately grant someone else in that cycle (default), or idle? And is lock only honoured when asserted in a cycle where that requester is already granted?",
+    "in_doc": true,
+    "answer": "Grant someone else immediately in that same cycle, with no idle cycle. If the owner drops req while lock_q=1, that cycle falls back to round-robin arbitration and the lock is released. Lock is honoured only when lock[i] is asserted while gnt[i] && req[i] are both true (lock_req = |(gnt & lock & req)). A lock[i] without gnt[i], or a lock without req, is ignored. This matches your default."
+  },
+  {
+    "id": "Q2",
+    "decision_id": "D7",
+    "question": "Does MAX_LOCK count the total burst length including the first grant (burst <= MAX_LOCK cycles) or only the locked continuation cycles? At expiry, may the same requester be re-granted immediately if nobody else is requesting?",
+    "in_doc": true,
+    "answer": "MAX_LOCK counts only the locked continuation cycles, so a burst can be up to MAX_LOCK+1 consecutive grants (the first arbitrated cycle plus MAX_LOCK continuations). If the limit you need includes the first cycle, set the parameter to L-1. At expiry the lock is released and the next cycle re-arbitrates normally, with the former owner at lowest priority. The arbiter is work-conserving, so if nobody else is requesting, the same requester is re-granted straight away through normal round-robin."
+  },
+  {
+    "id": "Q3",
+    "decision_id": "D8",
+    "question": "With MAX_LOCK=0 (unlimited lock), a master can starve others, contradicting R11. Should MAX_LOCK=0 be allowed with R11 conditional on masters releasing locks, be disallowed, or use an internal safety cap?",
+    "in_doc": false,
+    "answer": "Use the default: Allow MAX_LOCK=0 with no counter hardware. Document that R11 then holds only under the assumption that every lock is released in finite time. With MAX_LOCK>0 the bound is (N-1)*MAX_LOCK cycles of wait."
+  }
+]

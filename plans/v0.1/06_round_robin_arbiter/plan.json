@@ -1,0 +1,563 @@
+{
+  "steps": [
+    {
+      "id": "S1",
+      "title": "Scope the RRA-001 arbiter and trace R1-R11 to MA content",
+      "goal": "Write the Overview: a zero-latency, N-way (2..32) round-robin arbiter with lock/burst support, a MAX_LOCK bound on locked-continuation cycles, binary index/valid and locked-status outputs, targeting 500 MHz in 7 nm at N=16. Include a requirement-to-section trace table and record the clarifications from Q1-Q3.",
+      "spec_evidence": [
+        {
+          "section": "P2",
+          "quote": "shared-resource arbiter for the on-chip interconnect (up to 32 masters)."
+        },
+        {
+          "section": "P3",
+          "quote": "The arbiter shall support N requesters, N a parameter in 2..32."
+        },
+        {
+          "section": "P3",
+          "quote": "Grant decision shall be made in the same cycle as the request (zero-latency) to avoid bubbles on the interconnect."
+        }
+      ],
+      "decisions": [
+        {
+          "id": "D1",
+          "topic": "Grant path latency structure",
+          "options": [
+            "Purely combinational grant from req/lock plus registered arbitration state",
+            "Registered grant (1-cycle latency)"
+          ],
+          "status": "decided",
+          "choice": "gnt is computed combinationally in the same cycle from req, lock and registered state (pointer, lock owner, lock counter). No pipeline stage is allowed on req->gnt.",
+          "rationale": "R4 requires a zero-latency grant to avoid interconnect bubbles.",
+          "impact": "high",
+          "confidence": "high",
+          "question": ""
+        }
+      ],
+      "depends_on": [],
+      "output_section": [
+        "Overview"
+      ],
+      "done_when": [
+        "Overview states the function, the N range, the zero-latency property, the lock/MAX_LOCK feature (MAX_LOCK counts continuation cycles only) and the 500 MHz/7 nm/N=16 target",
+        "Trace table maps each of R1-R11 to at least one MA section",
+        "Overview states that the arbiter is work-conserving, with no idle cycles on lock release or expiry"
+      ]
+    },
+    {
+      "id": "S2",
+      "title": "Define the req/lock/gnt/index/valid/locked port list and the N, MAX_LOCK parameters",
+      "goal": "Fix every port with its width, direction and timing class (combinational output vs registered state), and every parameter with its derived widths.",
+      "spec_evidence": [
+        {
+          "section": "P3",
+          "quote": "The arbiter shall drive a one-hot `gnt[N-1:0]`; at most one bit is set per cycle."
+        },
+        {
+          "section": "P3",
+          "quote": "The arbiter shall output the binary index of the granted requester and a valid flag."
+        },
+        {
+          "section": "P3",
+          "quote": "The arbiter shall output a status flag indicating the current grant is a locked continuation."
+        },
+        {
+          "section": "P3",
+          "quote": "To bound latency, a single lock shall not exceed MAX_LOCK consecutive cycles; MAX_LOCK = 0 means unlimited."
+        }
+      ],
+      "decisions": [
+        {
+          "id": "D2",
+          "topic": "Downstream backpressure / grant-accept input",
+          "options": [
+            "No accept/ready input: a grant is consumed in every cycle it is asserted",
+            "Add a resource ready/enable input that freezes arbitration state"
+          ],
+          "status": "defaulted",
+          "choice": "No accept/ready input. Every asserted grant counts as a served cycle for pointer and lock-counter updates.",
+          "rationale": "The spec lists no such signal, and the zero-latency interconnect context suggests the resource accepts a grant every cycle.",
+          "impact": "medium",
+          "confidence": "medium",
+          "question": "Can the shared resource stall (backpressure)? If so, should the arbiter get a ready/accept input that holds the grant and freezes the round-robin pointer and lock counter?"
+        },
+        {
+          "id": "D3",
+          "topic": "Timing of index/valid/locked outputs",
+          "options": [
+            "Combinational, same cycle as gnt",
+            "Registered (one cycle after gnt)"
+          ],
+          "status": "defaulted",
+          "choice": "gnt_idx (width $clog2(N)), gnt_valid (= |gnt) and gnt_locked are combinational and cycle-aligned with gnt.",
+          "rationale": "Registering them would misalign them with the zero-latency grant and make them useless as a same-cycle mux select.",
+          "impact": "medium",
+          "confidence": "high",
+          "question": "Must the binary grant index, valid flag and locked flag be valid in the same cycle as gnt (combinational), or may they be registered one cycle later?"
+        }
+      ],
+      "depends_on": [
+        "S1"
+      ],
+      "output_section": [
+        "Interface",
+        "Parameters"
+      ],
+      "done_when": [
+        "Port table lists clk, rst_n, req[N-1:0], lock[N-1:0], gnt[N-1:0], index, valid and the locked flag, with widths and directions",
+        "Index width rule is stated for N=2..32, including N that is not a power of 2",
+        "MAX_LOCK semantics (number of locked-continuation cycles; burst up to MAX_LOCK+1 grants) and the counter width ($clog2(MAX_LOCK+1)) are stated, with MAX_LOCK=0 meaning no counter",
+        "Parameter checks (N in 2..32, MAX_LOCK>=0) are specified as elaboration-time assertions"
+      ]
+    },
+    {
+      "id": "S3",
+      "title": "Design the round-robin priority core: pointer register and masked priority encoding",
+      "goal": "Specify how the next grant is chosen so that the last-granted requester has the lowest priority, using a structure fast enough for N=16 at 500 MHz.",
+      "spec_evidence": [
+        {
+          "section": "P3",
+          "quote": "Arbitration shall be round-robin: after requester i is granted, requester i has the lowest priority in the next arbitration."
+        },
+        {
+          "section": "P3",
+          "quote": "A grant shall only be given to a requester whose `req` is asserted in that cycle."
+        },
+        {
+          "section": "P3",
+          "quote": "Must close timing at 500 MHz in 7 nm for N=16."
+        }
+      ],
+      "decisions": [
+        {
+          "id": "D4",
+          "topic": "Round-robin implementation structure",
+          "options": [
+            "Dual priority encoder: thermometer mask of positions above the last grant, masked and unmasked fixed-priority encoders, select masked if non-empty",
+            "Rotate -> fixed-priority -> rotate back (barrel shifters)",
+            "Parallel-prefix (Kogge-Stone style) find-first-set on doubled request vector"
+          ],
+          "status": "defaulted",
+          "choice": "Dual masked/unmasked fixed-priority encoders with a registered thermometer mask derived from the last granted index. Each find-first is implemented as a log-depth prefix-OR.",
+          "rationale": "This avoids barrel shifters on the critical path, has log2(N) depth, and is the standard choice for single-cycle RR at high frequency.",
+          "impact": "medium",
+          "confidence": "medium",
+          "question": "Do you have a preferred round-robin structure (masked dual priority encoder vs rotate/priority/rotate vs other), or is any structure acceptable as long as timing closes?"
+        },
+        {
+          "id": "D5",
+          "topic": "Pointer update policy",
+          "options": [
+            "Update pointer to the granted index on every cycle a grant is issued; hold when idle",
+            "Update pointer only at the end of a lock or burst",
+            "Advance pointer every cycle regardless of grant"
+          ],
+          "status": "defaulted",
+          "choice": "The registered pointer/mask updates to the granted index in every cycle gnt_valid=1, including locked-continuation cycles. It holds its value when no grant is given.",
+          "rationale": "This directly implements R5 and the Q2 answer (the former owner is lowest priority after expiry). Holding on idle preserves fairness history.",
+          "impact": "medium",
+          "confidence": "high",
+          "question": "When no requester is active, should the round-robin pointer hold its last value (default) or reset/advance?"
+        }
+      ],
+      "depends_on": [
+        "S2"
+      ],
+      "output_section": [
+        "Datapath",
+        "Block Diagram"
+      ],
+      "done_when": [
+        "Equations or pseudo-RTL are given for the mask, the masked request, both encoders, the select and the pointer next-state",
+        "It is shown that gnt is one-hot or zero and is a subset of req in every case",
+        "A worked N=4 example shows the priority order after each grant"
+      ]
+    },
+    {
+      "id": "S4",
+      "title": "Specify lock ownership: lock_req = |(gnt & lock & req), owner override, and same-cycle release when the owner drops req",
+      "goal": "Define the lock-owner state and its override of the RR core, following the Q1 answer: the lock is honoured only when it is asserted together with gnt and req, and it is released with immediate re-arbitration when the owner drops req.",
+      "spec_evidence": [
+        {
+          "section": "P3",
+          "quote": "A requester may assert `lock[i]` together with `req[i]` while granted to keep the grant in the following cycle (multi-cycle burst / atomic access)."
+        },
+        {
+          "section": "P3",
+          "quote": "A grant shall only be given to a requester whose `req` is asserted in that cycle."
+        }
+      ],
+      "decisions": [
+        {
+          "id": "D6",
+          "topic": "Lock sampling and release semantics",
+          "options": [
+            "Register lock_active/owner when gnt[i]&req[i]&lock[i]; next cycle grant owner only if req[owner] is still high, else drop the lock and arbitrate normally in that same cycle",
+            "Lock forces grant next cycle even if req drops (violates R3)",
+            "Combinational lock that holds the grant in the same cycle"
+          ],
+          "status": "decided",
+          "choice": "lock_req = |(gnt & lock & req). In cycle t, if lock_req (and the MAX_LOCK limit is not reached), set lock_q and register the owner as the granted index. In cycle t+1, if lock_q and req[owner], grant the owner (overriding RR). Otherwise release the lock and use normal RR in that same cycle, with no idle cycle. A lock[i] without gnt[i], or a lock without req, is ignored.",
+          "rationale": "The user's answer to Q1 confirms this behaviour.",
+          "impact": "high",
+          "confidence": "high",
+          "question": ""
+        }
+      ],
+      "depends_on": [
+        "S3"
+      ],
+      "output_section": [
+        "Control Logic",
+        "Datapath"
+      ],
+      "done_when": [
+        "The lock state (lock_q and an owner index or one-hot) is specified with next-state equations using lock_req = |(gnt & lock & req)",
+        "The override mux between the lock-owner grant and the RR grant is shown, including the req[owner] qualification",
+        "Ignored cases are listed: lock without req, lock from a non-granted requester, and owner dropping req (same-cycle fallback to RR)"
+      ]
+    },
+    {
+      "id": "S5",
+      "title": "Define the MAX_LOCK continuation counter: burst of up to MAX_LOCK+1 grants, expiry re-arbitration, no hardware for MAX_LOCK=0",
+      "goal": "Specify the counter that limits locked-continuation cycles to MAX_LOCK, the forced release at expiry with the former owner at lowest priority, and removal of the logic when MAX_LOCK=0.",
+      "spec_evidence": [
+        {
+          "section": "P3",
+          "quote": "To bound latency, a single lock shall not exceed MAX_LOCK consecutive cycles; MAX_LOCK = 0 means unlimited."
+        },
+        {
+          "section": "P3",
+          "quote": "Starvation-free: every requester holding `req` continuously shall be granted within a bounded number of cycles."
+        }
+      ],
+      "decisions": [
+        {
+          "id": "D7",
+          "topic": "MAX_LOCK counting and expiry behaviour",
+          "options": [
+            "Count all consecutive grant cycles of the burst including the initial grant",
+            "Count only locked-continuation cycles (burst length MAX_LOCK+1)",
+            "At expiry, force at least one cycle where the owner cannot be granted"
+          ],
+          "status": "decided",
+          "choice": "MAX_LOCK counts only locked-continuation cycles, so a burst is at most MAX_LOCK+1 consecutive grants (one arbitrated cycle plus up to MAX_LOCK continuations). After MAX_LOCK continuations, lock_req is ignored and the next cycle re-arbitrates normally with the former owner at lowest priority. The arbiter is work-conserving: if nobody else requests, the former owner is re-granted through normal RR, and that grant starts a new burst.",
+          "rationale": "The user's answer to Q2 settles this. Users who need the limit to include the first cycle set the parameter to L-1.",
+          "impact": "medium",
+          "confidence": "high",
+          "question": ""
+        },
+        {
+          "id": "D8",
+          "topic": "Interaction of MAX_LOCK=0 (unlimited) with starvation-freedom R11",
+          "options": [
+            "Guarantee R11 only when MAX_LOCK>0; with MAX_LOCK=0 the bound is conditional on masters releasing lock in finite time",
+            "Forbid MAX_LOCK=0 by assertion",
+            "Use a hidden internal cap when MAX_LOCK=0"
+          ],
+          "status": "decided",
+          "choice": "Allow MAX_LOCK=0 with no counter hardware. Document that R11 then holds only under the assumption that every lock is released in finite time. With MAX_LOCK>0 the wait is bounded. The user stated (N-1)*MAX_LOCK; the MA writer must re-derive the exact bound under the D7 counting, where each other master can hold up to MAX_LOCK+1 cycles, giving (N-1)*(MAX_LOCK+1). The discrepancy must be recorded.",
+          "rationale": "The user's answer to Q3 selected this option. The numeric bound must be consistent with the Q2 counting.",
+          "impact": "medium",
+          "confidence": "high",
+          "question": ""
+        }
+      ],
+      "depends_on": [
+        "S4"
+      ],
+      "output_section": [
+        "Control Logic",
+        "Parameters"
+      ],
+      "done_when": [
+        "Counter reset, increment (on each locked-continuation grant), clear (on release or new burst) and limit conditions are given as equations",
+        "The expiry condition (count == MAX_LOCK blocks the lock_q set) is specified, with a cycle-by-cycle example for MAX_LOCK=3: cycle 0 arbitrated, cycles 1-3 continuations, cycle 4 re-arbitrated, shown both with and without competing requesters",
+        "A generate-if that removes the counter when MAX_LOCK=0 is described",
+        "The worst-case wait bound formula for MAX_LOCK>0 is derived consistently with continuation-only counting"
+      ]
+    },
+    {
+      "id": "S6",
+      "title": "Derive gnt index, valid and locked-continuation status outputs",
+      "goal": "Specify the one-hot to binary encoder, the valid flag and the locked flag so they are consistent with gnt in every cycle.",
+      "spec_evidence": [
+        {
+          "section": "P3",
+          "quote": "The arbiter shall output the binary index of the granted requester and a valid flag."
+        },
+        {
+          "section": "P3",
+          "quote": "The arbiter shall output a status flag indicating the current grant is a locked continuation."
+        }
+      ],
+      "decisions": [
+        {
+          "id": "D9",
+          "topic": "Semantics of the locked-continuation flag",
+          "options": [
+            "Asserted only in cycles where the grant comes from the lock override (not the first cycle of a burst)",
+            "Asserted on every cycle of a locked burst, including the first"
+          ],
+          "status": "decided",
+          "choice": "The locked flag is high only in cycles where the grant is issued by the lock override (lock_q & req[owner]). It is low on the initial arbitrated grant of a burst, on a re-grant after expiry, and whenever gnt_valid=0. It is therefore high for at most MAX_LOCK consecutive cycles when MAX_LOCK>0.",
+          "rationale": "R9 says 'locked continuation', which excludes the initial grant. This matches the continuation-only counting in D7.",
+          "impact": "low",
+          "confidence": "high",
+          "question": ""
+        }
+      ],
+      "depends_on": [
+        "S4",
+        "S5"
+      ],
+      "output_section": [
+        "Datapath",
+        "Interface"
+      ],
+      "done_when": [
+        "The OR-tree one-hot to binary encoder is specified, and index is defined (e.g. 0) when valid=0",
+        "valid = |gnt is stated",
+        "The locked flag equation is given and checked against the S5 MAX_LOCK=3 example (high in cycles 1-3 only)"
+      ]
+    },
+    {
+      "id": "S7",
+      "title": "Block diagram and 500 MHz critical-path budget for the combinational req->gnt path",
+      "goal": "Draw the block diagram (mask/pointer regs, dual PE, lock override mux, continuation counter, encoders) and analyse the combinational depth from req/lock inputs to gnt/index outputs at N=16.",
+      "spec_evidence": [
+        {
+          "section": "P3",
+          "quote": "Must close timing at 500 MHz in 7 nm for N=16."
+        },
+        {
+          "section": "P3",
+          "quote": "Grant decision shall be made in the same cycle as the request (zero-latency) to avoid bubbles on the interconnect."
+        }
+      ],
+      "decisions": [
+        {
+          "id": "D10",
+          "topic": "I/O timing budget assumption for the combinational path",
+          "options": [
+            "Assume req/lock come from master flops and gnt/index go to flops, with the arbiter allotted about 50% of the 2 ns cycle",
+            "Arbiter owns the full cycle (registered inputs and outputs inside)",
+            "Budget supplied by the integrator"
+          ],
+          "status": "defaulted",
+          "choice": "Assume req and lock are launched from flops in the masters and gnt/idx are captured by flops or a mux in the resource. The arbiter's req->gnt and req->idx logic is budgeted at about 1 ns of the 2 ns period.",
+          "rationale": "Zero latency makes the arbiter part of an inter-block combinational path, so a budget split must be assumed to evaluate the 500 MHz target.",
+          "impact": "medium",
+          "confidence": "medium",
+          "question": "What portion of the 2 ns cycle (500 MHz) is the arbiter allowed for the combinational req->gnt and req->index path, given that requests come from masters and grants feed the interconnect mux?"
+        }
+      ],
+      "depends_on": [
+        "S3",
+        "S4",
+        "S5",
+        "S6"
+      ],
+      "output_section": [
+        "Block Diagram",
+        "Timing & Pipeline"
+      ],
+      "done_when": [
+        "The block diagram shows all registers and combinational blocks with signal flow",
+        "The critical path is identified (req -> masked PE -> select -> lock override mux qualified by req[owner] -> gnt -> index), with logic-depth estimates for N=16 and N=32",
+        "The lock/expiry control is shown to depend only on registered state plus req[owner], keeping it off the deep path",
+        "The statement 'no pipeline stages; all state updates at clock edge from current-cycle grant' is explicit"
+      ]
+    },
+    {
+      "id": "S8",
+      "title": "Single-clock domain and active-low asynchronous reset of pointer, lock and counter state",
+      "goal": "Specify the clock and reset scheme and the reset value of every state element.",
+      "spec_evidence": [
+        {
+          "section": "P3",
+          "quote": "Single clock, active-low asynchronous reset."
+        }
+      ],
+      "decisions": [
+        {
+          "id": "D11",
+          "topic": "Reset style and deassertion synchronisation",
+          "options": [
+            "Async assert on rst_n low; deassertion assumed synchronised externally",
+            "Integrate a reset synchroniser inside the arbiter"
+          ],
+          "status": "defaulted",
+          "choice": "All state flops use async active-low reset (always @(posedge clk or negedge rst_n)). Synchronous deassertion is the integrator's responsibility; no internal synchroniser is added.",
+          "rationale": "R10 fixes an async active-low reset. Reset synchronisers are normally provided at SoC level.",
+          "impact": "low",
+          "confidence": "medium",
+          "question": "Is rst_n already synchronised on deassertion at SoC level, or should the arbiter include its own reset synchroniser?"
+        }
+      ],
+      "depends_on": [
+        "S3",
+        "S4",
+        "S5"
+      ],
+      "output_section": [
+        "Clocking & Reset"
+      ],
+      "done_when": [
+        "Reset values are listed for the pointer/mask (e.g. requester 0 highest priority), lock_q, owner and the continuation counter",
+        "It is stated that after reset with lock_q=0, gnt follows pure RR, and that gnt=0, valid=0 and locked=0 hold whenever req=0",
+        "The single clock is confirmed, with no CDC"
+      ]
+    },
+    {
+      "id": "S9",
+      "title": "Enumerate corner cases: lock edge cases, MAX_LOCK expiry and re-grant, N extremes and the starvation bound",
+      "goal": "Document behaviour for every unusual input combination and prove the starvation bound under continuation-only MAX_LOCK counting.",
+      "spec_evidence": [
+        {
+          "section": "P3",
+          "quote": "Starvation-free: every requester holding `req` continuously shall be granted within a bounded number of cycles."
+        },
+        {
+          "section": "P3",
+          "quote": "A requester may assert `lock[i]` together with `req[i]` while granted to keep the grant in the following cycle (multi-cycle burst / atomic access)."
+        },
+        {
+          "section": "P3",
+          "quote": "The arbiter shall support N requesters, N a parameter in 2..32."
+        }
+      ],
+      "decisions": [],
+      "depends_on": [
+        "S4",
+        "S5",
+        "S6"
+      ],
+      "output_section": [
+        "Corner Cases & Error Handling"
+      ],
+      "done_when": [
+        "Cases covered: all req low; single requester; all requesters; lock without req; lock from a non-granted master; owner drops req while lock_q=1 (same-cycle RR fallback); expiry with others requesting (owner lowest priority); expiry with sole requester (immediate re-grant, new burst, locked flag low); lock asserted on the expiry cycle; MAX_LOCK=1; N=2; N=32; non-power-of-2 N",
+        "The starvation bound is derived for MAX_LOCK>0 with bursts of up to MAX_LOCK+1, and the MAX_LOCK=0 caveat is linked to D8",
+        "It is stated that there are no illegal-input error outputs; illegal combinations are ignored"
+      ]
+    },
+    {
+      "id": "S10",
+      "title": "Verification plan: reference model, SVA for one-hot/R3/RR/lock rules/continuation bound, and parameter sweep",
+      "goal": "Define how the MA will be verified against R1-R11 and the Q1-Q3 clarifications.",
+      "spec_evidence": [
+        {
+          "section": "P3",
+          "quote": "at most one bit is set per cycle."
+        },
+        {
+          "section": "P3",
+          "quote": "after requester i is granted, requester i has the lowest priority in the next arbitration."
+        },
+        {
+          "section": "P3",
+          "quote": "a single lock shall not exceed MAX_LOCK consecutive cycles"
+        }
+      ],
+      "decisions": [],
+      "depends_on": [
+        "S9"
+      ],
+      "output_section": [
+        "Verification Plan"
+      ],
+      "done_when": [
+        "Assertions are listed: $onehot0(gnt); gnt subset of req; valid==|gnt; idx matches gnt; locked flag implies previous-cycle lock_req for the same owner; consecutive locked cycles <= MAX_LOCK (burst <= MAX_LOCK+1) when MAX_LOCK>0; no idle cycle when req!=0 (work-conserving); RR order; bounded wait",
+        "A cycle-accurate reference model with a scoreboard is described",
+        "Directed tests for every S9 corner case are listed",
+        "A parameter sweep is listed: N in {2,3,16,31,32} x MAX_LOCK in {0,1,4}, plus a formal bounded proof for small N; for MAX_LOCK=0 the bounded-wait property is proven under an assume of finite lock duration",
+        "Coverage goals include each requester granted, lock expiry hit, lock released early by dropped req, and sole-requester re-grant after expiry"
+      ]
+    },
+    {
+      "id": "S11",
+      "title": "Record assumptions and open questions (backpressure, output timing, RR structure, idle pointer, timing budget, reset sync, R7/R11 caveat)",
+      "goal": "Collect every remaining defaulted decision and record the resolved clarifications from Q1-Q3 so the spec author can confirm them.",
+      "spec_evidence": [
+        {
+          "section": "P3",
+          "quote": "MAX_LOCK = 0 means unlimited."
+        },
+        {
+          "section": "P3",
+          "quote": "Must close timing at 500 MHz in 7 nm for N=16."
+        }
+      ],
+      "decisions": [],
+      "depends_on": [
+        "S2",
+        "S3",
+        "S4",
+        "S5",
+        "S7",
+        "S8"
+      ],
+      "output_section": [
+        "Assumptions & Open Questions"
+      ],
+      "done_when": [
+        "Every remaining defaulted decision (D2, D3, D4, D5, D10, D11) is listed with its chosen default and an open question",
+        "Resolved decisions D6, D7 and D8 are recorded as confirmed clarifications, including the 'set MAX_LOCK=L-1 to include the first cycle' guidance",
+        "The R7/R11 caveat for MAX_LOCK=0 is stated explicitly",
+        "The discrepancy between the user-quoted (N-1)*MAX_LOCK bound and the derived bound under continuation-only counting is recorded for confirmation",
+        "The I/O timing budget and external reset-sync assumptions are recorded"
+      ]
+    }
+  ],
+  "assumptions": [
+    {
+      "decision_id": "D2",
+      "topic": "Downstream backpressure / grant-accept input",
+      "assumed": "No accept/ready input. Every asserted grant counts as a served cycle for pointer and lock-counter updates.",
+      "impact": "medium",
+      "confidence": "medium",
+      "question": "Can the shared resource stall (backpressure)? If so, should the arbiter get a ready/accept input that holds the grant and freezes the round-robin pointer and lock counter?"
+    },
+    {
+      "decision_id": "D3",
+      "topic": "Timing of index/valid/locked outputs",
+      "assumed": "gnt_idx (width $clog2(N)), gnt_valid (= |gnt) and gnt_locked are combinational and cycle-aligned with gnt.",
+      "impact": "medium",
+      "confidence": "high",
+      "question": "Must the binary grant index, valid flag and locked flag be valid in the same cycle as gnt (combinational), or may they be registered one cycle later?"
+    },
+    {
+      "decision_id": "D4",
+      "topic": "Round-robin implementation structure",
+      "assumed": "Dual masked/unmasked fixed-priority encoders with a registered thermometer mask derived from the last granted index. Each find-first is implemented as a log-depth prefix-OR.",
+      "impact": "medium",
+      "confidence": "medium",
+      "question": "Do you have a preferred round-robin structure (masked dual priority encoder vs rotate/priority/rotate vs other), or is any structure acceptable as long as timing closes?"
+    },
+    {
+      "decision_id": "D5",
+      "topic": "Pointer update policy",
+      "assumed": "The registered pointer/mask updates to the granted index in every cycle gnt_valid=1, including locked-continuation cycles. It holds its value when no grant is given.",
+      "impact": "medium",
+      "confidence": "high",
+      "question": "When no requester is active, should the round-robin pointer hold its last value (default) or reset/advance?"
+    },
+    {
+      "decision_id": "D10",
+      "topic": "I/O timing budget assumption for the combinational path",
+      "assumed": "Assume req and lock are launched from flops in the masters and gnt/idx are captured by flops or a mux in the resource. The arbiter's req->gnt and req->idx logic is budgeted at about 1 ns of the 2 ns period.",
+      "impact": "medium",
+      "confidence": "medium",
+      "question": "What portion of the 2 ns cycle (500 MHz) is the arbiter allowed for the combinational req->gnt and req->index path, given that requests come from masters and grants feed the interconnect mux?"
+    },
+    {
+      "decision_id": "D11",
+      "topic": "Reset style and deassertion synchronisation",
+      "assumed": "All state flops use async active-low reset (always @(posedge clk or negedge rst_n)). Synchronous deassertion is the integrator's responsibility; no internal synchroniser is added.",
+      "impact": "low",
+      "confidence": "medium",
+      "question": "Is rst_n already synchronised on deassertion at SoC level, or should the arbiter include its own reset synchroniser?"
+    }
+  ]
+}

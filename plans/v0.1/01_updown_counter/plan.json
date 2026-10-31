@@ -1,0 +1,542 @@
+{
+  "steps": [
+    {
+      "id": "S1",
+      "title": "Scope the parameterizable up/down counter with WRAP/SATURATE modes and terminal-count flag",
+      "goal": "Write the Overview: an N-bit synchronous up/down counter with parallel load (priority over counting), a compile-time WRAP/SATURATE overflow policy, a tc flag decoded from the registered count and the live up input, and an area-over-speed design goal.",
+      "spec_evidence": [
+        {
+          "section": "P1",
+          "quote": "# updown_counter"
+        },
+        {
+          "section": "P2",
+          "quote": "N-bit counter, N parameterizable (default 8)"
+        },
+        {
+          "section": "P2",
+          "quote": "parameter MODE: WRAP or SATURATE"
+        },
+        {
+          "section": "P2",
+          "quote": "Fmax is not critical; small area preferred"
+        }
+      ],
+      "decisions": [
+        {
+          "id": "D9",
+          "topic": "Is MODE fixed at elaboration time or selectable at runtime",
+          "options": [
+            "Compile-time parameter",
+            "Runtime input pin"
+          ],
+          "status": "decided",
+          "choice": "Compile-time parameter; only the selected overflow logic is generated",
+          "rationale": "The spec says 'parameter MODE', and a parameter also saves area.",
+          "impact": "medium",
+          "confidence": "high",
+          "question": ""
+        }
+      ],
+      "depends_on": [],
+      "output_section": [
+        "Overview"
+      ],
+      "done_when": [
+        "The Overview fits in one paragraph and states the function, the load-over-count priority, both MODE behaviours, the tc purpose and the small-area goal",
+        "The Overview states that MODE is fixed at elaboration",
+        "The Overview states that count is registered and tc is a combinational decode"
+      ]
+    },
+    {
+      "id": "S2",
+      "title": "Define ports and the N/MODE parameters, including how MODE is encoded",
+      "goal": "Produce the port table (clk, rst, en, up, load, load_val[N-1:0], count[N-1:0], tc) and the parameter table (N default 8; MODE with its legal values and default).",
+      "spec_evidence": [
+        {
+          "section": "P2",
+          "quote": "inputs: en, up (1=count up, 0=count down), load, load_val[N-1:0]"
+        },
+        {
+          "section": "P2",
+          "quote": "outputs: count[N-1:0], tc (terminal count)"
+        },
+        {
+          "section": "P2",
+          "quote": "N-bit counter, N parameterizable (default 8)"
+        },
+        {
+          "section": "P2",
+          "quote": "parameter MODE: WRAP or SATURATE"
+        }
+      ],
+      "decisions": [
+        {
+          "id": "D1",
+          "topic": "MODE parameter representation and default value",
+          "options": [
+            "String parameter \"WRAP\"/\"SATURATE\", default \"WRAP\"",
+            "Integer parameter with localparams WRAP=0/SATURATE=1, default WRAP",
+            "Integer parameter, default SATURATE"
+          ],
+          "status": "defaulted",
+          "choice": "String parameter MODE with legal values \"WRAP\" and \"SATURATE\", default \"WRAP\"",
+          "rationale": "This matches the spec wording directly and is well supported by Verilog-2001 synthesis tools. WRAP is the conventional counter default.",
+          "impact": "low",
+          "confidence": "medium",
+          "question": "Should MODE be a string parameter (\"WRAP\"/\"SATURATE\") or an integer code, and which mode is the default?"
+        },
+        {
+          "id": "D7",
+          "topic": "Definition of 'max'",
+          "options": [
+            "Full range 2^N-1 (all ones)",
+            "Separate MAX parameter below 2^N-1"
+          ],
+          "status": "defaulted",
+          "choice": "max = 2^N-1 (all ones); no separate modulus parameter",
+          "rationale": "The spec describes an 'N-bit counter' and mentions no modulus, so full range is implied. The user's tc formula uses MAX without defining it otherwise.",
+          "impact": "medium",
+          "confidence": "high",
+          "question": "Is 'max' always 2^N-1, or do you need a configurable maximum/modulus?"
+        }
+      ],
+      "depends_on": [
+        "S1"
+      ],
+      "output_section": [
+        "Interface",
+        "Parameters"
+      ],
+      "done_when": [
+        "Each port has a direction, width, active level and one-line description",
+        "The tc port is described as a combinational output decoded from the count register and the live up input",
+        "The parameter table lists N (default 8, with the minimum legal value stated) and MODE (type, legal values, default)",
+        "An illegal MODE value is handled, for example by an elaboration-time error, and the handling is documented",
+        "max is defined as {N{1'b1}}"
+      ]
+    },
+    {
+      "id": "S3",
+      "title": "Specify tc as a combinational decode of registered count and live up",
+      "goal": "Define tc = (up && count==MAX) || (!up && count==0), with no flop and no en/load qualification. Document that tc follows a change of up within the same cycle, and that this is consistent with the registered-output rule, which applies to count only.",
+      "spec_evidence": [
+        {
+          "section": "P2",
+          "quote": "tc = 1 when count is at max while counting up, or at 0 while counting down"
+        },
+        {
+          "section": "P2",
+          "quote": "registered outputs, no combinational path from inputs to count"
+        }
+      ],
+      "decisions": [
+        {
+          "id": "D2",
+          "topic": "tc implementation: decode of registered count plus live up, or a fully registered flop",
+          "options": [
+            "Combinational decode: tc = up ? (count==max) : (count==0), so there is a path from up to tc",
+            "Registered tc flop computed from next_count and the current up, so tc lags a change of up by one cycle"
+          ],
+          "status": "decided",
+          "choice": "Combinational decode of the count register and the live up input; no extra flop. A registered TC_REG option is out of scope and is only a possible future addition.",
+          "rationale": "User answer Q1: tc may be a combinational decode, tc follows a change of up immediately, and only count must be registered.",
+          "impact": "medium",
+          "confidence": "high",
+          "question": ""
+        },
+        {
+          "id": "D3",
+          "topic": "Is tc qualified by en (and by load)?",
+          "options": [
+            "tc ignores en: it depends only on count and up",
+            "tc = en & boundary condition (cascade-friendly ripple-carry style)"
+          ],
+          "status": "decided",
+          "choice": "tc ignores en and load; it depends only on count and up",
+          "rationale": "The user's answer to Q1 gives the exact formula tc = (up && count==MAX) || (!up && count==0), which has no en or load term. This agrees with the spec's definition, which uses only count and direction.",
+          "impact": "low",
+          "confidence": "high",
+          "question": ""
+        }
+      ],
+      "depends_on": [
+        "S2"
+      ],
+      "output_section": [
+        "Control Logic",
+        "Timing & Pipeline"
+      ],
+      "done_when": [
+        "A truth table gives tc for every combination of up, count==0 and count==max",
+        "The doc states that tc is a decode and that up is the only input with a combinational path to tc (count comes from the register)",
+        "The doc states that tc may glitch when up or count changes, and that a registered TC_REG variant is a possible future addition",
+        "The doc states tc behaviour in SATURATE mode while count is held at a boundary (tc stays high while the direction is unchanged)",
+        "The doc states that tc is independent of en and load"
+      ]
+    },
+    {
+      "id": "S4",
+      "title": "Specify next-state priority: rst > load > en-count > hold",
+      "goal": "Write the control logic that selects the next count: synchronous reset first, then parallel load, then count up or down when en=1, and otherwise hold.",
+      "spec_evidence": [
+        {
+          "section": "P2",
+          "quote": "load has priority over counting"
+        },
+        {
+          "section": "P2",
+          "quote": "sync active-high reset `rst`, single clock `clk`"
+        },
+        {
+          "section": "P2",
+          "quote": "inputs: en, up (1=count up, 0=count down), load, load_val[N-1:0]"
+        }
+      ],
+      "decisions": [
+        {
+          "id": "D4",
+          "topic": "Does load require en=1?",
+          "options": [
+            "load acts regardless of en",
+            "load acts only when en=1"
+          ],
+          "status": "defaulted",
+          "choice": "load acts regardless of en",
+          "rationale": "'Priority over counting' implies load is an independent, higher-priority operation. en gates counting only.",
+          "impact": "low",
+          "confidence": "medium",
+          "question": "Should load_val be loaded whenever load=1, even if en=0, or only when en=1?"
+        },
+        {
+          "id": "D5",
+          "topic": "Reset priority and reset value",
+          "options": [
+            "rst overrides load and en; count resets to 0",
+            "rst overrides; count resets to a parameterized value",
+            "load overrides rst"
+          ],
+          "status": "defaulted",
+          "choice": "rst has highest priority; count resets to 0",
+          "rationale": "This is the industry-standard convention for synchronous reset, and the spec gives no other reset value.",
+          "impact": "low",
+          "confidence": "high",
+          "question": "Should rst override load, and should count reset to 0 or to some other value?"
+        }
+      ],
+      "depends_on": [
+        "S2"
+      ],
+      "output_section": [
+        "Control Logic"
+      ],
+      "done_when": [
+        "A priority table covers every combination of rst, load, en and up, with the resulting next count",
+        "The table states that up is ignored for the next count when en=0 and load=0, while up still affects tc"
+      ]
+    },
+    {
+      "id": "S5",
+      "title": "Design an area-minimal \u00b11 datapath with MODE-dependent boundary handling",
+      "goal": "Define the next-count datapath: one shared \u00b11 adder, and one boundary compare (==max / ==0 selected by up) shared between saturation and the tc decode. A next-state mux selects among load_val, the adder result, the held value and 0.",
+      "spec_evidence": [
+        {
+          "section": "P2",
+          "quote": "WRAP: max+1 -> 0, 0-1 -> max"
+        },
+        {
+          "section": "P2",
+          "quote": "SATURATE: stick at max / 0"
+        },
+        {
+          "section": "P2",
+          "quote": "Fmax is not critical; small area preferred"
+        }
+      ],
+      "decisions": [
+        {
+          "id": "D8",
+          "topic": "Arithmetic structure for up/down counting",
+          "options": [
+            "Single N-bit adder: count + (up ? 1 : {N{1'b1}})",
+            "Separate incrementer and decrementer followed by a mux"
+          ],
+          "status": "defaulted",
+          "choice": "A single shared adder adds +1 or -1 (all ones). WRAP uses natural modulo-2^N overflow. SATURATE suppresses the update when the boundary compare for the current direction is true, and that compare is the same signal as tc.",
+          "rationale": "The spec prefers small area and Fmax is not critical, so sharing logic is the right tradeoff. Wraparound comes for free from N-bit arithmetic, and the tc decode can double as the saturation detect.",
+          "impact": "low",
+          "confidence": "high",
+          "question": "Is a single shared add/subtract-by-one datapath acceptable, given that area matters more than speed?"
+        }
+      ],
+      "depends_on": [
+        "S3",
+        "S4"
+      ],
+      "output_section": [
+        "Datapath"
+      ],
+      "done_when": [
+        "Datapath equations are given for both MODE values",
+        "The doc shows that WRAP needs no compare for count update, and that SATURATE uses the tc signal as its hold condition",
+        "The doc states that MODE selects logic through generate or a constant condition, so the unused path is optimized away"
+      ]
+    },
+    {
+      "id": "S6",
+      "title": "Draw the block diagram: count register, \u00b11 adder, shared boundary detect/tc, next-state mux",
+      "goal": "Provide a block diagram that connects the S4 control priority to the S5 datapath. It must show that tc is a combinational output of the boundary detect, fed by the count register Q output and the up input.",
+      "spec_evidence": [
+        {
+          "section": "P2",
+          "quote": "registered outputs, no combinational path from inputs to count"
+        },
+        {
+          "section": "P2",
+          "quote": "outputs: count[N-1:0], tc (terminal count)"
+        }
+      ],
+      "decisions": [],
+      "depends_on": [
+        "S4",
+        "S5"
+      ],
+      "output_section": [
+        "Block Diagram"
+      ],
+      "done_when": [
+        "The diagram shows every port, the N-bit count register, the adder, the boundary detect, the priority mux and the tc output",
+        "count is driven only by the register Q output",
+        "tc is driven by combinational decode logic from the count register and up, with no flop, per D2"
+      ]
+    },
+    {
+      "id": "S7",
+      "title": "Document single-cycle timing and the output-path guarantees",
+      "goal": "State that there is no pipeline: inputs sampled at clock edge k appear on count after edge k. List all combinational paths to outputs, including the same-cycle path from up to tc.",
+      "spec_evidence": [
+        {
+          "section": "P2",
+          "quote": "registered outputs, no combinational path from inputs to count"
+        },
+        {
+          "section": "P2",
+          "quote": "Fmax is not critical; small area preferred"
+        }
+      ],
+      "decisions": [
+        {
+          "id": "D11",
+          "topic": "Pipeline depth",
+          "options": [
+            "Single-cycle: next count is registered on the next edge",
+            "Pipelined compare/add"
+          ],
+          "status": "decided",
+          "choice": "Single cycle with no pipelining; count comes directly from the register",
+          "rationale": "The spec says Fmax is not critical and requires registered outputs.",
+          "impact": "low",
+          "confidence": "high",
+          "question": ""
+        }
+      ],
+      "depends_on": [
+        "S3",
+        "S5"
+      ],
+      "output_section": [
+        "Timing & Pipeline"
+      ],
+      "done_when": [
+        "A cycle-level waveform covers load, count up, count down, hold and a boundary event in both modes",
+        "The waveform shows tc responding in the same cycle to a change of up at a boundary",
+        "The critical path is identified: count register through the adder/compare and mux back to the register",
+        "Every combinational path to an output is listed: none to count; up->tc and count reg->tc for tc"
+      ]
+    },
+    {
+      "id": "S8",
+      "title": "Define clocking and synchronous reset behaviour",
+      "goal": "Document the single clk domain, the synchronous active-high rst, and the reset value of count. Give the tc value that results after reset, which depends on up because tc is a decode.",
+      "spec_evidence": [
+        {
+          "section": "P2",
+          "quote": "sync active-high reset `rst`, single clock `clk`"
+        }
+      ],
+      "decisions": [
+        {
+          "id": "D10",
+          "topic": "Clocking and reset style",
+          "options": [
+            "Single rising-edge clk with synchronous active-high rst, no clock gating",
+            "Asynchronous reset",
+            "Clock gating for en"
+          ],
+          "status": "decided",
+          "choice": "Single rising-edge clk; synchronous active-high rst; en implemented as a datapath enable, not a clock gate",
+          "rationale": "The spec requires a sync active-high reset and a single clock.",
+          "impact": "medium",
+          "confidence": "high",
+          "question": ""
+        }
+      ],
+      "depends_on": [
+        "S4",
+        "S3"
+      ],
+      "output_section": [
+        "Clocking & Reset"
+      ],
+      "done_when": [
+        "The doc states that rst is sampled on the clk rising edge and resets count to 0, per D5",
+        "The doc states that tc has no reset of its own: after reset, count=0 gives tc=1 when up=0 and tc=0 when up=1 (for N>=1)",
+        "The doc states that no CDC or clock gating is present"
+      ]
+    },
+    {
+      "id": "S9",
+      "title": "Enumerate boundary and priority corner cases across both modes",
+      "goal": "List the edge behaviours: load at a boundary value, a change of up while at a boundary (tc toggles immediately), en=0 at a boundary (tc is still asserted), simultaneous rst/load/en, N=1, and an illegal MODE.",
+      "spec_evidence": [
+        {
+          "section": "P2",
+          "quote": "SATURATE: stick at max / 0"
+        },
+        {
+          "section": "P2",
+          "quote": "WRAP: max+1 -> 0, 0-1 -> max"
+        },
+        {
+          "section": "P2",
+          "quote": "tc = 1 when count is at max while counting up, or at 0 while counting down"
+        },
+        {
+          "section": "P2",
+          "quote": "load has priority over counting"
+        }
+      ],
+      "decisions": [],
+      "depends_on": [
+        "S3",
+        "S4",
+        "S5"
+      ],
+      "output_section": [
+        "Corner Cases & Error Handling"
+      ],
+      "done_when": [
+        "Each corner case lists the expected count and tc for both MODE values",
+        "The N=1 behaviour is described: max=1 and the two boundaries are adjacent",
+        "The doc covers tc asserted while en=0 at a boundary, and tc asserted in the same cycle as a load to a boundary value",
+        "Handling of an illegal MODE value at elaboration is described",
+        "The doc notes that there are no runtime error conditions"
+      ]
+    },
+    {
+      "id": "S10",
+      "title": "Plan verification against a reference model for both MODE values and several N",
+      "goal": "Define a self-checking testbench with a cycle-accurate reference model in which tc is checked combinationally against the current count and up. Directed tests cover the boundary and priority cases; random tests drive the en/up/load/rst stimulus.",
+      "spec_evidence": [
+        {
+          "section": "P2",
+          "quote": "N-bit counter, N parameterizable (default 8)"
+        },
+        {
+          "section": "P2",
+          "quote": "parameter MODE: WRAP or SATURATE"
+        },
+        {
+          "section": "P2",
+          "quote": "tc = 1 when count is at max while counting up, or at 0 while counting down"
+        }
+      ],
+      "decisions": [],
+      "depends_on": [
+        "S9"
+      ],
+      "output_section": [
+        "Verification Plan"
+      ],
+      "done_when": [
+        "The test matrix covers MODE in {WRAP, SATURATE} crossed with N in {1, small, 8}",
+        "Every S9 corner case has a directed test",
+        "Assertions check: count changes only on a clk edge; rst wins; load wins over counting; count holds at a boundary in SATURATE; tc == (up && count==MAX) || (!up && count==0) at all times",
+        "Coverage goals include both boundaries in both directions, load during en=0, tc rising and falling, and up toggling while at a boundary"
+      ]
+    },
+    {
+      "id": "S11",
+      "title": "Record assumptions and the remaining open load and MODE questions",
+      "goal": "Collect every remaining defaulted decision (D1, D4, D5, D7, D8) as an assumption with its open question. Record that D2/D3 were resolved by the user and that TC_REG is a possible future extension.",
+      "spec_evidence": [
+        {
+          "section": "P2",
+          "quote": "registered outputs, no combinational path from inputs to count"
+        },
+        {
+          "section": "P2",
+          "quote": "load has priority over counting"
+        }
+      ],
+      "decisions": [],
+      "depends_on": [
+        "S2",
+        "S3",
+        "S4",
+        "S5"
+      ],
+      "output_section": [
+        "Assumptions & Open Questions"
+      ],
+      "done_when": [
+        "Each defaulted decision is listed with its chosen default and the question to ask",
+        "D2 and D3 are recorded as resolved by the user's answer, with the exact tc formula",
+        "An optional registered TC_REG variant is noted as a future extension, not implemented",
+        "D4 (load vs en) and D1 (MODE encoding/default) are flagged as the main remaining open items"
+      ]
+    }
+  ],
+  "assumptions": [
+    {
+      "decision_id": "D1",
+      "topic": "MODE parameter representation and default value",
+      "assumed": "String parameter MODE with legal values \"WRAP\" and \"SATURATE\", default \"WRAP\"",
+      "impact": "low",
+      "confidence": "medium",
+      "question": "Should MODE be a string parameter (\"WRAP\"/\"SATURATE\") or an integer code, and which mode is the default?"
+    },
+    {
+      "decision_id": "D7",
+      "topic": "Definition of 'max'",
+      "assumed": "max = 2^N-1 (all ones); no separate modulus parameter",
+      "impact": "medium",
+      "confidence": "high",
+      "question": "Is 'max' always 2^N-1, or do you need a configurable maximum/modulus?"
+    },
+    {
+      "decision_id": "D4",
+      "topic": "Does load require en=1?",
+      "assumed": "load acts regardless of en",
+      "impact": "low",
+      "confidence": "medium",
+      "question": "Should load_val be loaded whenever load=1, even if en=0, or only when en=1?"
+    },
+    {
+      "decision_id": "D5",
+      "topic": "Reset priority and reset value",
+      "assumed": "rst has highest priority; count resets to 0",
+      "impact": "low",
+      "confidence": "high",
+      "question": "Should rst override load, and should count reset to 0 or to some other value?"
+    },
+    {
+      "decision_id": "D8",
+      "topic": "Arithmetic structure for up/down counting",
+      "assumed": "A single shared adder adds +1 or -1 (all ones). WRAP uses natural modulo-2^N overflow. SATURATE suppresses the update when the boundary compare for the current direction is true, and that compare is the same signal as tc.",
+      "impact": "low",
+      "confidence": "high",
+      "question": "Is a single shared add/subtract-by-one datapath acceptable, given that area matters more than speed?"
+    }
+  ]
+}
