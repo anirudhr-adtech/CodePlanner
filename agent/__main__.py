@@ -9,6 +9,7 @@ Examples:
 
 import argparse
 import json
+import shutil
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -56,8 +57,9 @@ def main():
     ap.add_argument("--max-rounds", type=int, default=5)
     ap.add_argument("--repeat", type=int, default=1, help="independent runs per example")
     ap.add_argument("--tag", default="", help="label appended to the run directory name")
+    ap.add_argument("--resume", help="existing run directory name under runs/; redo only examples without a judge.json")
     args = ap.parse_args()
-    stamp = time.strftime("%Y%m%d-%H%M%S") + (f"-{args.tag}" if args.tag else "")
+    stamp = args.resume or time.strftime("%Y%m%d-%H%M%S") + (f"-{args.tag}" if args.tag else "")
 
     if args.spec:
         if not args.interactive:
@@ -73,8 +75,12 @@ def main():
         names = [args.example]
     runs = [f"{stamp}/r{r}" if args.repeat > 1 else stamp for r in range(1, args.repeat + 1)]
 
+    def done(run, name):
+        return (ROOT / "runs" / run / name / "judge.json").is_file()
+
     def job(item):
         run, name = item
+        shutil.rmtree(ROOT / "runs" / run / name, ignore_errors=True)  # drop a failed partial run
         ex = ROOT / "examples" / name
         ma_doc = (ex / "microarch.md").read_text()
         user = InteractiveUser() if args.interactive else SimulatedUser(ma_doc, model=args.sim_model)
@@ -86,7 +92,8 @@ def main():
 
     jobs = 1 if args.interactive else args.jobs
     with ThreadPoolExecutor(max_workers=jobs) as pool:
-        results = dict(pool.map(job, [(run, n) for run in runs for n in names]))
+        todo = [(run, n) for run in runs for n in names if not (args.resume and done(run, n))]
+        results = dict(pool.map(job, todo))
     for run in runs:
         own = {n: v for (r, n), v in results.items() if r == run}
         if len(own) > 1:
