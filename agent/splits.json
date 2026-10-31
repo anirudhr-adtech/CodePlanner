@@ -1,0 +1,26 @@
+{
+  "test": [
+    "03_pwm_generator",
+    "07_uart_transceiver",
+    "11_interrupt_controller",
+    "14_fir_filter",
+    "17_apb_timer_watchdog",
+    "19_dma_controller"
+  ],
+  "dev": [
+    "01_updown_counter",
+    "02_debounce_edge_detect",
+    "04_sync_fifo",
+    "05_traffic_light_fsm",
+    "06_round_robin_arbiter",
+    "08_spi_master",
+    "09_i2c_master",
+    "10_async_fifo",
+    "12_crc32_engine",
+    "13_pipelined_mac",
+    "15_axi_lite_regfile",
+    "16_axis_skid_buffer",
+    "18_direct_mapped_cache",
+    "20_rv32i_5stage_pipeline"
+  ]
+}

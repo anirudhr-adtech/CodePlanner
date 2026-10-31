@@ -47,14 +47,17 @@ def main():
     src.add_argument("--example", help="example folder name under examples/")
     src.add_argument("--spec", help="path to a spec file")
     src.add_argument("--all", action="store_true", help="run every example")
+    src.add_argument("--split", choices=["dev", "test"], help="run the examples in agent/splits.json")
     ap.add_argument("--interactive", action="store_true", help="answer questions yourself")
     ap.add_argument("--model", default="claude-opus-5-5", help="planner model")
     ap.add_argument("--sim-model", default="claude-opus-5-5", help="simulated-user model")
     ap.add_argument("--no-judge", action="store_true", help="skip scoring against the MA doc")
     ap.add_argument("--jobs", type=int, default=1, help="examples to run in parallel")
     ap.add_argument("--max-rounds", type=int, default=5)
+    ap.add_argument("--repeat", type=int, default=1, help="independent runs per example")
+    ap.add_argument("--tag", default="", help="label appended to the run directory name")
     args = ap.parse_args()
-    stamp = time.strftime("%Y%m%d-%H%M%S")
+    stamp = time.strftime("%Y%m%d-%H%M%S") + (f"-{args.tag}" if args.tag else "")
 
     if args.spec:
         if not args.interactive:
@@ -62,24 +65,32 @@ def main():
         run_one(Path(args.spec).stem, Path(args.spec).read_text(), InteractiveUser(), args, stamp)
         return
 
-    names = ([p.name for p in sorted((ROOT / "examples").iterdir()) if p.is_dir()]
-             if args.all else [args.example])
+    if args.split:
+        names = json.loads((ROOT / "agent" / "splits.json").read_text())[args.split]
+    elif args.all:
+        names = [p.name for p in sorted((ROOT / "examples").iterdir()) if p.is_dir()]
+    else:
+        names = [args.example]
+    runs = [f"{stamp}/r{r}" if args.repeat > 1 else stamp for r in range(1, args.repeat + 1)]
 
-    def job(name):
+    def job(item):
+        run, name = item
         ex = ROOT / "examples" / name
         ma_doc = (ex / "microarch.md").read_text()
         user = InteractiveUser() if args.interactive else SimulatedUser(ma_doc, model=args.sim_model)
         try:
-            return name, run_one(name, (ex / "spec.md").read_text(), user, args, stamp, ma_doc)
+            return (run, name), run_one(name, (ex / "spec.md").read_text(), user, args, run, ma_doc)
         except Exception as e:  # keep the batch going; the error is in the summary
             print(f"[{name}] FAILED: {type(e).__name__}: {e}")
-            return name, {"status": "error", "error": f"{type(e).__name__}: {e}"}
+            return (run, name), {"status": "error", "error": f"{type(e).__name__}: {e}"}
 
     jobs = 1 if args.interactive else args.jobs
     with ThreadPoolExecutor(max_workers=jobs) as pool:
-        results = dict(pool.map(job, names))
-    if len(results) > 1:
-        (ROOT / "runs" / stamp / "all_summaries.json").write_text(json.dumps(results, indent=2))
+        results = dict(pool.map(job, [(run, n) for run in runs for n in names]))
+    for run in runs:
+        own = {n: v for (r, n), v in results.items() if r == run}
+        if len(own) > 1:
+            (ROOT / "runs" / run / "all_summaries.json").write_text(json.dumps(own, indent=2))
 
 
 if __name__ == "__main__":

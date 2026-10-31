@@ -17,6 +17,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("run_dir")
     ap.add_argument("--jobs", type=int, default=5)
+    ap.add_argument("--out", default="judge_v2.json", help="file name for the new scores")
     args = ap.parse_args()
     run = Path(args.run_dir)
 
@@ -26,14 +27,14 @@ def main():
         qa = json.loads((d / "qa.json").read_text())
         detail, score, _ = judge_plan((ex / "spec.md").read_text(), plan, qa,
                                       (ex / "microarch.md").read_text())
-        (d / "judge_v2.json").write_text(json.dumps({"score": score, **detail}, indent=2) + "\n")
+        (d / args.out).write_text(json.dumps({"score": score, **detail}, indent=2) + "\n")
         print(f"{d.name}: {score}")
         return d.name, score
 
     dirs = sorted(p for p in run.iterdir() if (p / "plan.json").is_file())
     with ThreadPoolExecutor(max_workers=args.jobs) as pool:
         scores = dict(pool.map(job, dirs))
-    (run / "rejudge_v2.json").write_text(json.dumps(scores, indent=2) + "\n")
+    (run / f"rejudge_{Path(args.out).stem}.json").write_text(json.dumps(scores, indent=2) + "\n")
 
 
 if __name__ == "__main__":
