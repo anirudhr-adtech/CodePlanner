@@ -20,7 +20,7 @@ def build_user_message(spec, qa_history, prev_plan, feedback):
         lines = [f"- Q ({q['id']}): {q['question']}\n  A: {q['answer']}" for q in qa_history]
         parts.append("# Questions already asked and answers\n\n" + "\n".join(lines))
     if prev_plan:
-        parts.append("# Previous plan\n\n```json\n" + json.dumps(prev_plan, indent=1) + "\n```")
+        parts.append("# Previous plan\n\n```json\n" + json.dumps({"steps": prev_plan["steps"]}, indent=1) + "\n```")
     if feedback:
         parts.append("# Your previous output failed these checks; fix them\n\n"
                      + "\n".join(f"- {f}" for f in feedback))

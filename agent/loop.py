@@ -1,11 +1,26 @@
-"""The agent loop: draft -> check -> (retry) -> ask blocking questions -> repeat."""
+"""The agent loop: draft -> check -> (retry) -> ask-or-assume -> repeat."""
 
 import json
 import time
 from pathlib import Path
 
 from .checker import check_plan
-from .spec_reader import normalize
+
+RANK = {"high": 2, "medium": 1, "low": 0}
+MAX_QUESTIONS_PER_ROUND = 4
+
+
+def should_ask(d):
+    """Ask-or-assume rule, owned by the agent: ask about a defaulted decision when
+    getting it wrong is costly and the planner is not sure of its default."""
+    if d.get("status") != "defaulted":
+        return False
+    impact, conf = d.get("impact"), d.get("confidence")
+    return (impact == "high" and conf in ("low", "medium")) or (impact == "medium" and conf == "low")
+
+
+def priority(d):
+    return (RANK.get(d.get("impact"), 0), -RANK.get(d.get("confidence"), 0))
 
 
 class RunLog:
@@ -23,9 +38,8 @@ class RunLog:
 
 
 def run_agent(spec, planner, user, log, max_rounds=5, max_retries=2, echo=print):
-    qa_history = []          # [{id, question, answer, in_doc, decision_id}]
-    asked = set()            # normalized question texts already asked
-    answered_decisions = set()
+    qa_history = []          # [{id, decision_id, question, answer, in_doc}]
+    answered = set()         # decision ids already put to the user
     plan, metrics, status = None, {}, "cap_reached"
     totals = {"llm_calls": 0, "retries": 0, "input_tokens": 0, "output_tokens": 0}
 
@@ -40,7 +54,8 @@ def run_agent(spec, planner, user, log, max_rounds=5, max_retries=2, echo=print)
             log.event("llm_turn", round=rnd, attempt=attempt, record=record,
                       errors=errors, metrics=metrics)
             echo(f"round {rnd} attempt {attempt}: {metrics.get('steps', 0)} steps, "
-                 f"{metrics.get('blocking_questions', 0)} blocking q, {len(errors)} check errors")
+                 f"{metrics.get('decisions', 0)} decisions ({metrics.get('defaulted', 0)} defaulted), "
+                 f"{len(errors)} check errors")
             if not errors:
                 break
             feedback = errors
@@ -51,31 +66,33 @@ def run_agent(spec, planner, user, log, max_rounds=5, max_retries=2, echo=print)
             log.event("stop", reason="checks still failing after retries", errors=errors)
             break
 
-        # Question gate: blocking, not already asked, decision not already settled.
-        to_ask = [q for q in plan.get("questions", [])
-                  if q.get("blocking")
-                  and normalize(q["question"]) not in asked
-                  and q.get("decision_id") not in answered_decisions]
-        dropped = [q["id"] for q in plan.get("questions", []) if q.get("blocking") and q not in to_ask]
-        log.event("gate", round=rnd, ask=[q["id"] for q in to_ask], dropped_repeats=dropped)
+        decisions = [d for s in plan["steps"] for d in s["decisions"]]
+        candidates = [d for d in decisions if should_ask(d) and d["id"] not in answered]
+        to_ask = sorted(candidates, key=priority, reverse=True)[:MAX_QUESTIONS_PER_ROUND]
+        log.event("gate", round=rnd, ask=[d["id"] for d in to_ask],
+                  assumed=[d["id"] for d in decisions
+                           if d["status"] == "defaulted" and not should_ask(d)],
+                  repeats_skipped=[d["id"] for d in decisions if should_ask(d) and d["id"] in answered])
         if not to_ask:
             status = "ready"
             break
-        for q in to_ask:
+        for d in to_ask:
+            q = {"id": d["id"], "question": d["question"], "why_it_matters": d["rationale"],
+                 "default": d["choice"]}
             ans = user.ask(q)
-            asked.add(normalize(q["question"]))
-            answered_decisions.add(q.get("decision_id"))
-            qa_history.append({"id": q["id"], "question": q["question"],
-                               "decision_id": q.get("decision_id"), **ans})
-            log.event("answer", round=rnd, question=q, **ans)
-            echo(f"  asked {q['id']}: {q['question'][:90]}")
+            answered.add(d["id"])
+            qa_history.append({"id": f"Q{len(qa_history) + 1}", "decision_id": d["id"],
+                               "question": d["question"], **ans})
+            log.event("answer", round=rnd, decision=d, **ans)
+            echo(f"  asked {d['id']} ({d['impact']} impact, {d['confidence']} conf): {d['question'][:80]}")
             echo(f"    -> {ans['answer'][:90]}")
 
-    # Non-blocking questions were never asked; keep them apart so the MA writer
-    # sees which defaults a user could still override.
+    # Defaulted decisions that were never asked are the plan's assumptions.
     if plan:
-        plan["deferred_questions"] = [q for q in plan.get("questions", []) if not q.get("blocking")]
-        plan["questions"] = [q for q in plan.get("questions", []) if q.get("blocking")]
+        plan["assumptions"] = [
+            {"decision_id": d["id"], "topic": d["topic"], "assumed": d["choice"],
+             "impact": d["impact"], "confidence": d["confidence"], "question": d["question"]}
+            for s in plan["steps"] for d in s["decisions"] if d["status"] == "defaulted"]
 
     summary = {
         "status": status,

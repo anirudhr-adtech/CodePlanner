@@ -6,7 +6,11 @@ metrics are logged for studying behaviour.
 
 import re
 
+from .schema import MA_SECTIONS
 from .spec_reader import normalize, split_sections
+
+MIN_STEPS = 6
+MAX_DECISIONS = 16
 
 # Bare titles that say nothing about the specific design.
 GENERIC_TITLES = {
@@ -46,10 +50,23 @@ def check_plan(plan, spec):
     section_ids = {sid for sid, _ in split_sections(spec)}
     steps = plan["steps"]
     step_ids = [s.get("id") for s in steps]
-    decision_ids = {d.get("id") for s in steps for d in s.get("decisions", [])}
+    decisions = [d for s in steps for d in s.get("decisions", [])]
+    decision_ids = [d.get("id") for d in decisions]
 
     if len(set(step_ids)) != len(step_ids):
         errors.append("duplicate step ids")
+    if len(set(decision_ids)) != len(decision_ids):
+        errors.append("duplicate decision ids; decision ids must be unique across the plan")
+    if len(steps) < MIN_STEPS:
+        errors.append(f"only {len(steps)} steps; a complete plan needs at least {MIN_STEPS}")
+    if len(decisions) > MAX_DECISIONS:
+        errors.append(f"{len(decisions)} decisions; keep only architecture-level ones "
+                      f"(at most {MAX_DECISIONS}) and leave details to the MA writer")
+
+    fed = {sec for s in steps for sec in s.get("output_section", [])}
+    missing_sections = [sec for sec in MA_SECTIONS if sec not in fed]
+    if missing_sections:
+        errors.append(f"no step feeds MA section(s): {', '.join(missing_sections)}")
 
     quotes = grounded = generic = 0
     for s in steps:
@@ -71,9 +88,6 @@ def check_plan(plan, spec):
         for dep in s.get("depends_on", []):
             if dep not in step_ids:
                 errors.append(f"{sid}: depends on unknown step {dep!r}")
-        for d in s.get("decisions", []):
-            if d.get("status") == "decided" and not d.get("choice"):
-                errors.append(f"{sid}/{d.get('id')}: decided but no choice given")
         title = re.sub(r"[^a-z ]", "", s.get("title", "").lower()).strip()
         if title in GENERIC_TITLES:
             generic += 1
@@ -81,27 +95,24 @@ def check_plan(plan, spec):
     if _has_cycle(steps):
         errors.append("depends_on graph has a cycle")
 
-    questions = plan.get("questions", [])
-    for q in questions:
-        if not q.get("default"):
-            errors.append(f"{q.get('id')}: question has no default")
-        if q.get("decision_id") and q["decision_id"] not in decision_ids:
-            errors.append(f"{q.get('id')}: refers to unknown decision {q['decision_id']!r}")
-
-    decisions = [d for s in steps for d in s.get("decisions", [])]
-    asked_for = {q.get("decision_id") for q in questions}
     for d in decisions:
-        if d.get("status") == "open" and d.get("id") not in asked_for:
-            errors.append(f"{d.get('id')}: open decision with no question; decide it or ask")
+        did = d.get("id", "?")
+        if not d.get("choice"):
+            errors.append(f"{did}: no choice given")
+        if d.get("status") == "defaulted" and not d.get("question"):
+            errors.append(f"{did}: defaulted decision has no question")
+
+    defaulted = [d for d in decisions if d.get("status") == "defaulted"]
     metrics = {
         "steps": len(steps),
         "decisions": len(decisions),
-        "open_decisions": sum(d.get("status") == "open" for d in decisions),
-        "questions": len(questions),
-        "blocking_questions": sum(bool(q.get("blocking")) for q in questions),
+        "defaulted": len(defaulted),
+        "defaulted_high_impact": sum(d.get("impact") == "high" for d in defaulted),
+        "defaulted_low_confidence": sum(d.get("confidence") == "low" for d in defaulted),
         "quotes": quotes,
         "grounded_quotes": grounded,
         "grounding": round(grounded / quotes, 3) if quotes else 0.0,
         "generic_titles": generic,
+        "sections_fed": len(MA_SECTIONS) - len(missing_sections),
     }
     return errors, metrics

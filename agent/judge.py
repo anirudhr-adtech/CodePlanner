@@ -21,13 +21,15 @@ JUDGE_SCHEMA = {
                     "spec_settles_it": {"type": "boolean", "description": "True if the spec text alone determines this choice."},
                     "in_plan": {"type": "string", "enum": ["matches", "differs", "missing"]},
                     "plan_choice": {"type": "string", "description": "What the plan decided or defaulted, or empty if missing."},
+                    "difference": {"type": "string", "enum": ["none", "equivalent", "material"],
+                                   "description": "For 'differs': equivalent if both choices are sound and the rest of the architecture barely changes; material if it changes structure, interfaces or visible behaviour. 'none' otherwise."},
                     "note": {"type": "string"},
                 },
             },
         },
         "needless_questions": {
             "type": "array",
-            "description": "Ids of blocking questions the spec already answered or that do not change the architecture.",
+            "description": "Ids (Q1, Q2, ...) of asked questions the spec already answered or that do not change the architecture.",
             "items": {"type": "string"},
         },
         "summary": {"type": "string"},
@@ -41,8 +43,10 @@ JUDGE_SYSTEM = (
     "List the 8-15 most important architecture decisions in the MA document. For each, "
     "say whether the plan reaches the same choice (matches), a different one (differs) or "
     "does not address it at all (missing). Defaults and assumptions in the plan count as "
-    "choices. A different but defensible choice where the spec is silent is still 'differs'. "
-    "Then list blocking questions that were needless. Be strict and concrete."
+    "choices. A different but defensible choice where the spec is silent is still 'differs'; "
+    "rate each difference as equivalent or material. Only list decisions at architecture "
+    "level, not naming or encoding details. Then list asked questions that were needless. "
+    "Be strict and concrete."
 )
 
 
@@ -61,8 +65,10 @@ def judge_plan(spec, plan, qa, ma_doc, model="claude-opus-5-5"):
         "missing": sum(k["in_plan"] == "missing" for k in ks),
         "spec_silent": len(silent),
         "spec_silent_differs": sum(k["in_plan"] == "differs" for k in silent),
+        "material_differs": sum(k["in_plan"] == "differs" and k["difference"] == "material" for k in ks),
         "needless_questions": len(out["needless_questions"]),
     }
     score["coverage"] = round((score["matches"] + score["differs"]) / len(ks), 3) if ks else 0.0
     score["agreement"] = round(score["matches"] / len(ks), 3) if ks else 0.0
+    score["sound"] = round((len(ks) - score["missing"] - score["material_differs"]) / len(ks), 3) if ks else 0.0
     return out, score, usage

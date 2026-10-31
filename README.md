@@ -50,16 +50,19 @@ your trainer rejects extra keys.
 2. Run `python3 scripts/build_dataset.py --check`.
 3. Rebuild the JSONL files.
 
-## MA planner agent (v0)
+## MA planner agent (v0.1)
 
 The planner does not write the MA doc. It turns a spec into a spec-specific **step plan**
-for writing one, plus the questions that would change the architecture. The agent runs
-the loop around the planner model:
+for writing one, and lists the architecture decisions it depends on. Each decision is
+`decided` (the spec or an answer settles it) or `defaulted`, with an impact and a
+confidence rating plus the question that would settle it. The **agent**, not the model,
+decides what to ask: a defaulted decision is put to the user when it is high impact with
+less than high confidence, or medium impact with low confidence.
 
 ```
 spec -> planner LLM (one turn, JSON) -> code checks --fail--> retry with feedback
                                           |pass
-                          blocking questions? --yes--> ask user -> next turn
+                     ask-or-assume rule? --ask--> ask user -> next turn
                                           |no
                                         READY -> plan.json / plan.md
 ```
@@ -67,12 +70,13 @@ spec -> planner LLM (one turn, JSON) -> code checks --fail--> retry with feedbac
 | File | Role |
 |------|------|
 | `agent/planner_llm.py` | The only planning model call. Swap `ClaudePlanner` for the trained model later. |
-| `agent/schema.py` | The plan JSON contract (steps, decisions, questions, assumptions). |
+| `agent/schema.py` | The plan JSON contract (steps, decisions with impact/confidence/question). |
 | `prompts/planner_system.md` | Planner instructions. |
-| `agent/checker.py` | Code checks: verbatim quotes, done-criteria, dependencies, generic titles, open decisions. |
-| `agent/loop.py` | Draft, check, retry, question gate, stop rule (ready or 5 rounds). |
+| `agent/checker.py` | Code checks: verbatim quotes, every MA section fed, step/decision counts, done-criteria, dependencies, generic titles. |
+| `agent/loop.py` | Draft, check, retry, ask-or-assume rule, stop rule (ready or 5 rounds). |
 | `agent/user.py` | Interactive user, or a simulated user that answers from the example's MA doc. |
-| `agent/judge.py` | Evaluation only: compares the plan's decisions with the MA doc (answer key). |
+| `agent/judge.py` | Evaluation only: compares the plan's decisions with the MA doc (answer key), separating material from equivalent differences. |
+| `agent/rejudge.py` | Re-score an earlier run with the current judge. |
 
 ```bash
 pip install -r requirements.txt
