@@ -16,6 +16,10 @@ def plan_to_markdown(plan, title="MA plan"):
                 out += [f"- {d['id']} {d['topic']}: **{d['choice']}** ({tag})",
                         f"  - options: {' / '.join(d.get('options', []))}",
                         f"  - {d.get('rationale', '')}"]
+        if s.get("corner_cases"):
+            out += ["", "**Corner cases:**"]
+            out += [f"- {c['id']} {c['case']}: recommend **{c['recommend']}** ({c['confidence']} confidence)"
+                    for c in s["corner_cases"]]
         out += ["", "**Done when:**"] + [f"- {c}" for c in s.get("done_when", [])] + [""]
     if plan.get("assumptions"):
         out += ["## Assumptions (defaults not confirmed by the user)", ""]

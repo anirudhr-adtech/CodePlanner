@@ -7,20 +7,43 @@ from pathlib import Path
 from .checker import check_plan
 
 RANK = {"high": 2, "medium": 1, "low": 0}
-MAX_QUESTIONS_PER_ROUND = 4
+MAX_QUESTIONS_PER_ROUND = 6
 
 
 def should_ask(d):
-    """Ask-or-assume rule, owned by the agent: ask about a defaulted decision when
-    getting it wrong is costly and the planner is not sure of its default."""
+    """Ask-or-assume rule for decisions, owned by the agent: ask about a defaulted
+    decision when getting it wrong costs at least a medium rework and the planner is
+    not highly confident in its default."""
     if d.get("status") != "defaulted":
         return False
     impact, conf = d.get("impact"), d.get("confidence")
-    return (impact == "high" and conf in ("low", "medium")) or (impact == "medium" and conf == "low")
+    return impact in ("high", "medium") and conf in ("low", "medium")
 
 
-def priority(d):
-    return (RANK.get(d.get("impact"), 0), -RANK.get(d.get("confidence"), 0))
+def should_ask_corner(c):
+    """Corner cases change little structure, so only ask when the planner is unsure."""
+    return c.get("confidence") == "low" and bool(c.get("question"))
+
+
+def priority(item):
+    # Decisions before corner cases; within each, higher impact and lower confidence first.
+    is_decision = "impact" in item
+    return (is_decision, RANK.get(item.get("impact"), 0), -RANK.get(item.get("confidence"), 0))
+
+
+def repair(plan, errors):
+    """Fix what the agent can fix without the model. Returns the errors left."""
+    left = []
+    for e in errors:
+        if e.endswith("defaulted decision has no question"):
+            did = e.split(":")[0]
+            for st in plan["steps"]:
+                for d in st["decisions"]:
+                    if d["id"] == did:
+                        d["question"] = f"For {d['topic']}, which do you want: {' / '.join(d['options'])}?"
+        else:
+            left.append(e)
+    return left
 
 
 class RunLog:
@@ -62,37 +85,49 @@ def run_agent(spec, planner, user, log, max_rounds=5, max_retries=2, echo=print)
             totals["retries"] += 1
         plan = draft
         if errors:
+            errors = repair(plan, errors)
+            if not errors:
+                log.event("repaired", round=rnd)
+        if errors:
             status = "invalid"
             log.event("stop", reason="checks still failing after retries", errors=errors)
             break
 
         decisions = [d for s in plan["steps"] for d in s["decisions"]]
-        candidates = [d for d in decisions if should_ask(d) and d["id"] not in answered]
+        corners = [c for s in plan["steps"] for c in s.get("corner_cases", [])]
+        askable = [d for d in decisions if should_ask(d)] + [c for c in corners if should_ask_corner(c)]
+        candidates = [x for x in askable if x["id"] not in answered]
         to_ask = sorted(candidates, key=priority, reverse=True)[:MAX_QUESTIONS_PER_ROUND]
-        log.event("gate", round=rnd, ask=[d["id"] for d in to_ask],
-                  assumed=[d["id"] for d in decisions
-                           if d["status"] == "defaulted" and not should_ask(d)],
-                  repeats_skipped=[d["id"] for d in decisions if should_ask(d) and d["id"] in answered])
+        log.event("gate", round=rnd, ask=[x["id"] for x in to_ask],
+                  assumed=[d["id"] for d in decisions if d["status"] == "defaulted" and not should_ask(d)]
+                  + [c["id"] for c in corners if not should_ask_corner(c)],
+                  repeats_skipped=[x["id"] for x in askable if x["id"] in answered])
         if not to_ask:
             status = "ready"
             break
-        for d in to_ask:
-            q = {"id": d["id"], "question": d["question"], "why_it_matters": d["rationale"],
-                 "default": d["choice"]}
+        for x in to_ask:
+            is_decision = "impact" in x
+            q = {"id": x["id"], "question": x["question"],
+                 "why_it_matters": x["rationale"] if is_decision else x["case"],
+                 "default": x["choice"] if is_decision else x["recommend"]}
             ans = user.ask(q)
-            answered.add(d["id"])
-            qa_history.append({"id": f"Q{len(qa_history) + 1}", "decision_id": d["id"],
-                               "question": d["question"], **ans})
-            log.event("answer", round=rnd, decision=d, **ans)
-            echo(f"  asked {d['id']} ({d['impact']} impact, {d['confidence']} conf): {d['question'][:80]}")
+            answered.add(x["id"])
+            qa_history.append({"id": f"Q{len(qa_history) + 1}", "decision_id": x["id"],
+                               "question": x["question"], **ans})
+            log.event("answer", round=rnd, item=x, **ans)
+            echo(f"  asked {x['id']} ({x.get('impact', 'corner')}, {x['confidence']} conf): {x['question'][:80]}")
             echo(f"    -> {ans['answer'][:90]}")
 
-    # Defaulted decisions that were never asked are the plan's assumptions.
+    # Defaulted decisions and corner-case recommendations never confirmed are the plan's assumptions.
     if plan:
         plan["assumptions"] = [
             {"decision_id": d["id"], "topic": d["topic"], "assumed": d["choice"],
              "impact": d["impact"], "confidence": d["confidence"], "question": d["question"]}
             for s in plan["steps"] for d in s["decisions"] if d["status"] == "defaulted"]
+        plan["assumptions"] += [
+            {"decision_id": c["id"], "topic": c["case"], "assumed": c["recommend"],
+             "impact": "corner case", "confidence": c["confidence"], "question": c["question"]}
+            for s in plan["steps"] for c in s.get("corner_cases", []) if c["id"] not in answered]
 
     summary = {
         "status": status,

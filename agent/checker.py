@@ -102,6 +102,14 @@ def check_plan(plan, spec):
         if d.get("status") == "defaulted" and not d.get("question"):
             errors.append(f"{did}: defaulted decision has no question")
 
+    corners = [c for s in steps for c in s.get("corner_cases", [])]
+    corner_ids = [c.get("id") for c in corners]
+    if len(set(corner_ids)) != len(corner_ids):
+        errors.append("duplicate corner case ids; corner case ids must be unique across the plan")
+    for c in corners:
+        if not c.get("recommend"):
+            errors.append(f"{c.get('id', '?')}: corner case has no recommended resolution")
+
     defaulted = [d for d in decisions if d.get("status") == "defaulted"]
     metrics = {
         "steps": len(steps),
@@ -114,5 +122,7 @@ def check_plan(plan, spec):
         "grounding": round(grounded / quotes, 3) if quotes else 0.0,
         "generic_titles": generic,
         "sections_fed": len(MA_SECTIONS) - len(missing_sections),
+        "corner_cases": len(corners),
+        "corner_cases_low_confidence": sum(c.get("confidence") == "low" for c in corners),
     }
     return errors, metrics

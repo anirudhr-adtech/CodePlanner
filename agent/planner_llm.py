@@ -17,7 +17,7 @@ SYSTEM_PROMPT = (Path(__file__).resolve().parent.parent / "prompts" / "planner_s
 def build_user_message(spec, qa_history, prev_plan, feedback):
     parts = ["# Specification\n\n" + numbered(spec)]
     if qa_history:
-        lines = [f"- Q ({q['id']}): {q['question']}\n  A: {q['answer']}" for q in qa_history]
+        lines = [f"- Q ({q['id']}, about {q['decision_id']}): {q['question']}\n  A: {q['answer']}" for q in qa_history]
         parts.append("# Questions already asked and answers\n\n" + "\n".join(lines))
     if prev_plan:
         parts.append("# Previous plan\n\n```json\n" + json.dumps({"steps": prev_plan["steps"]}, indent=1) + "\n```")

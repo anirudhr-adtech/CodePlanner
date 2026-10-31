@@ -8,7 +8,8 @@ Steps
 - Every step must be specific to this design. A step like "Define interface" with no design-specific content is useless; say what must be worked out for this design and why.
 - Together the steps must feed every MA section: Overview, Interface, Parameters, Block Diagram, Datapath, Control Logic, Timing & Pipeline, Clocking & Reset, Corner Cases & Error Handling, Verification Plan, Assumptions & Open Questions. Aim for 8-12 steps.
 - `spec_evidence` quotes must be copied exactly from the spec (verbatim substrings, no paraphrase), with the section id of each quote. A step about a concern the spec does not mention (for example reset) may cite the closest relevant text.
-- `done_when` gives concrete, checkable completion criteria for the MA writer. When a criterion names an externally visible corner case (zero or maximum configuration values, simultaneous events and which wins, output values during and right after reset, behaviour after an error or terminal state, illegal inputs), add your recommended resolution, for example "PERIOD=0 behaviour stated (recommend: output held inactive)". Name each such case for this design specifically; "handle corner cases" is not acceptable.
+- `done_when` gives concrete, checkable completion criteria for the MA writer.
+- `corner_cases` lists the externally visible corner cases the step must resolve for this design: zero or maximum configuration values, simultaneous events and which wins, output values during and right after reset, behaviour after an error or terminal state, illegal inputs. Name each case specifically ("handle corner cases" is not acceptable) and give your `recommend`ed resolution, a `confidence` (same scale as decisions) and the `question` that would settle it. Corner cases that need a new decision-level choice belong in `decisions` instead.
 - `depends_on` lists step ids that must come first.
 
 Decisions
@@ -20,9 +21,10 @@ Decisions
   - high: the spec or an answer settles it, or nearly every engineer would choose the same in this context.
   - medium: there is a clear engineering favourite, but a common alternative would also satisfy the spec.
   - low: the spec author's intent is unknown and the options give visibly different behaviour, interfaces or cost. Anything that goes beyond the spec's scope is low.
+- If the spec explicitly hands a choice to you ("make a call", "your choice", "up to you", "tell us what you assumed"), do not ask about it: make the call, mark it `defaulted` with high confidence, and say in `rationale` that the spec delegated it.
 - Questions are only about the design's behaviour, interfaces and structure. Never ask about tool flow, constraint or file formats, coding style (for example inferred RTL versus vendor primitives), or verification tooling; choose those yourself and rate them high confidence, low impact. If the spec states or clearly implies the answer, the decision is `decided`, not a question.
 - `question`: for every `defaulted` decision, the short question you would ask the spec author to settle it, phrased so it can be answered without reading your plan. Empty string for `decided` decisions.
 
-You do not decide whether to ask; the agent does, using impact and confidence. Rate them honestly. Do not inflate confidence to avoid questions or deflate it to ask more.
+You do not decide whether to ask; the agent does, using impact and confidence on decisions and corner cases. Rate them honestly. Do not inflate confidence to avoid questions or deflate it to ask more.
 
-On later turns, fold the user's answers in: mark the affected decisions `decided` with the answered choice, and keep the rest of the plan stable unless an answer changes it.
+On later turns, fold the user's answers in: mark the affected decisions `decided` with the answered choice; for answered corner cases set `recommend` to the answer, `confidence` to high and `question` to an empty string. Keep the rest of the plan stable unless an answer changes it.

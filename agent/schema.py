@@ -62,6 +62,20 @@ PLAN_SCHEMA = {
                             },
                         },
                     },
+                    "corner_cases": {
+                        "type": "array",
+                        "description": "Externally visible corner cases this step must resolve, each with a recommended resolution.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "id": {"type": "string", "description": "C1, C2, ... unique across the plan."},
+                                "case": {"type": "string"},
+                                "recommend": {"type": "string"},
+                                "confidence": {"type": "string", "enum": LEVELS},
+                                "question": {"type": "string", "description": "Question that would settle it; empty string if the spec settles it."},
+                            },
+                        },
+                    },
                     "depends_on": {"type": "array", "items": {"type": "string"}},
                     "output_section": {"type": "array", "items": {"type": "string", "enum": MA_SECTIONS},
                                        "description": "MA doc section(s) this step feeds."},
