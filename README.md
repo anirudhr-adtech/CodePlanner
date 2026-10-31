@@ -1,7 +1,12 @@
 # CodePlanner
 
-A planner for Verilog coding projects. This repository holds a fine-tuning dataset that
-teaches a model to turn a **Verilog design specification** into a **micro-architecture plan**.
+A planner for Verilog coding projects. **Current phase: P0**, an agent that turns a
+Verilog design specification into the right **steps for creating a micro-architecture
+(MA) document**, with the Claude API as the planning model until our own LLM replaces it
+in P1. Writing the MA documents themselves is Phase 2. See [ROADMAP.md](ROADMAP.md).
+
+The `examples/` folder holds 20 specs with reference MA documents. In P0 they are the
+answer keys used to score the agent's plans.
 
 ## Layout
 
@@ -50,7 +55,7 @@ your trainer rejects extra keys.
 2. Run `python3 scripts/build_dataset.py --check`.
 3. Rebuild the JSONL files.
 
-## MA planner agent (v0.1)
+## P0: MA planner agent (v0.1)
 
 The planner does not write the MA doc. It turns a spec into a spec-specific **step plan**
 for writing one, and lists the architecture decisions it depends on. Each decision is
