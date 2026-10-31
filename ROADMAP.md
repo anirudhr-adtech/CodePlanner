@@ -34,6 +34,25 @@ Done so far:
 | Questions asked / needless | 2 / 0 | 31 / 6 |
 | Decisions per plan (median) | 22 | 11 |
 
+Goal set: **P0 at 90% good** (sound key decisions). Work towards it, scored on the 14
+dev specs with 3 runs each; the 6 test specs in `agent/splits.json` are held out.
+
+| Dev metric (pooled over runs) | v0.1 | v0.2 (42 runs) | v0.3 (32 of 42 runs) |
+|---|---|---|---|
+| P0 sound (delegated counts) | 89.2% | 91.0% | **93.3%** |
+| Strict sound | 84.3% | 89.6% | **91.4%** |
+| Agreement with answer key | 72% | 74% | 78% |
+| Material differences per plan | 0.96 | 1.10 | 0.69 |
+| Questions per plan | 1.6 | 1.6 | 4.0 |
+| Needless share | 9-14% | 21% | 15.5% |
+
+- v0.2: minimal-scope defaults, corner-case recommendations, confidence definitions, no
+  questions on tool flow.
+- v0.3: structured corner cases the agent can ask about, ask rule covers medium/medium,
+  spec-delegated choices are not asked, agent repairs a missing question.
+- The v0.3 dev run stopped when the API account ran out of credit (10 runs left). Still
+  to do: finish dev, then 3 runs on the held-out test specs.
+
 Proposed exit criteria for P0 (to be confirmed):
 - Results repeat across 3 runs per spec, not one lucky run.
 - Sound decisions (no material difference, nothing missing) at or above 90%.
